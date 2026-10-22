@@ -76,6 +76,11 @@ FAKE_PEER = r"""
   };
 })();
 """
+# en el anfitrión, descifrar tarda un poco (como en un móvil lento): así llegan presencias mientras descifra
+SLOW_DECRYPT = r"""
+(() => { const d = SubtleCrypto.prototype.decrypt;
+  SubtleCrypto.prototype.decrypt = function (...a) { return new Promise(r => setTimeout(r, 150)).then(() => d.apply(this, a)); }; })();
+"""
 registry = {}
 queue, members, emits_log = [], {}, []   # members[room] = {peer: {'page':page,'presence':{}}}
 def pump(rounds=6, wait=60):
@@ -133,7 +138,7 @@ with sync_playwright() as p:
     pages = {}
     def new_page(name, can_edit):
         ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, has_touch=True)
-        ctx.add_init_script(f'window.__CAN_EDIT = {"true" if can_edit else "false"};' + (FAKE_PEER if WEB else FAKE))
+        ctx.add_init_script(f'window.__CAN_EDIT = {"true" if can_edit else "false"};' + (FAKE_PEER if WEB else FAKE) + (SLOW_DECRYPT if can_edit else ''))
         ctx.route('**/*', lambda r: r.abort() if r.request.url.startswith('http') else r.continue_())
         ctx.expose_binding('__hubSend', lambda src, s: queue.append((src['page'], json.loads(s))))
         pg = ctx.new_page()
@@ -222,11 +227,19 @@ with sync_playwright() as p:
                     idx = [pl['pid'] for pl in g['players']].index(store(pg)['me']['pid'])
                     check(str(idx) not in store(host)['jam']['extra']['votes'], f'{tag}: no cuenta un voto de la partida anterior')
                     replay = False
+                if capture and g['round'] == 1 and e['voteN'] == 0:
+                    # votos casi a la vez: el anfitrión vota primero y los demás sin esperar entre uno y otro.
+                    # Algunos llegan mientras el anfitrión descifra otro voto; aun así la votación se cierra sola.
+                    if host.locator('[data-a="jh-myvote"]').count(): host.locator('[data-a="jh-myvote"]').first.click(); pump(2)
+                    voters = [pg for pg in players if pg.locator('[data-a="jp-vote"]').count()]
+                    for pg in voters: pg.locator('[data-a="jp-vote"]').first.click()
+                    pump(8)
+                    x = store(host)['jam']
+                    check(x['game']['phase'] != 'vote' or x['extra']['voteN'] == 1, f'{tag}: con votos simultáneos la votación se cierra sola ({len(x["extra"]["votes"])} votos)')
+                    if not WEB: STALE.extend((pg, dict(peer_of(pg)[1]['presence']['vote'])) for pg in voters)
                 for pg in players:
                     if pg.locator('[data-a="jp-vote"]').count():
                         pg.locator('[data-a="jp-vote"]').first.click(); pump(2)
-                        if capture and not WEB and g['round'] == 1:
-                            STALE.append((pg, dict(peer_of(pg)[1]['presence']['vote'])))
                 if shots and guard < 30: players[0].screenshot(path=str(SHOTS / 'jam_player_voted.png'))
                 if host.locator('[data-a="jh-myvote"]').count(): host.locator('[data-a="jh-myvote"]').first.click()
                 pump(6)

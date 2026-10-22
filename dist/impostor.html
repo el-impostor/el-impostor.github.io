@@ -2326,34 +2326,38 @@ if (false) module.exports = Rules;
   }
 
   /* ---------- señales de los jugadores ---------- */
-  let processing = false;
+  // si llegan señales mientras se descifra un voto, se apunta y se repasa todo otra vez al terminar
+  let processing = false, again = false;
   async function processSignals() {
-    const j = jam(), g = j && j.game; if (!g || processing) return;
+    if (!jg()) return;
+    if (processing) { again = true; return; }
     processing = true;
-    try {
-      const e = j.extra;
-      const idxOf = pid => g.players.findIndex(p => p.pid === pid);
-      for (const [pid, pr] of Object.entries(J.pres)) {
-        const i = idxOf(pid); if (i < 0) continue;
-        if (pr.ack === g.id && !e.acks.includes(pid)) e.acks.push(pid);
-        if (g.phase === 'reveal' && pr.ready === g.id && !e.ready.includes(i)) { e.ready.push(i); if (!e.acks.includes(pid)) e.acks.push(pid); }
-        if (g.phase === 'clues' && g.order[g.turn] === i && pr.clue && pr.clue.k === turnKey(g)) { hostClue(String(pr.clue.text || '').slice(0, 60), false); }
-        if (g.phase === 'vote' && g.players[i].alive && e.votes[i] == null && pr.vote && pr.vote.k === e.voteKey && pr.vote.b) {
-          try {
-            const v = await unseal(await keyFor(pid), pr.vote.b);
-            if (v.k === e.voteKey && g.phase === 'vote' && e.votes[i] == null) {
-              const t = Number(v.t);
-              e.votes[i] = (t === -1 || (e.candidates.includes(t) && t !== i)) ? t : -1;
-            }
-          } catch (x) {}
-        }
-        if (g.phase === 'voteResult' && g.guessState === 'pending' && g.lastVote.eliminated === i && pr.guess && pr.guess.k === e.voteKey && pr.guess.t) {
-          e.guessText = String(pr.guess.t).slice(0, 40); hostGuess(R.guessMatches(g, e.guessText));
-        }
-      }
-      if (g.phase === 'vote' && allVoted()) closeVote();
-    } finally { processing = false; }
+    try { do { again = false; await processOnce(); } while (again && jg()); } finally { processing = false; }
     emitState(); renderSoon();
+  }
+  async function processOnce() {
+    const j = jam(), g = j && j.game; if (!g) return;
+    const e = j.extra;
+    const idxOf = pid => g.players.findIndex(p => p.pid === pid);
+    for (const [pid, pr] of Object.entries(J.pres)) {
+      const i = idxOf(pid); if (i < 0) continue;
+      if (pr.ack === g.id && !e.acks.includes(pid)) e.acks.push(pid);
+      if (g.phase === 'reveal' && pr.ready === g.id && !e.ready.includes(i)) { e.ready.push(i); if (!e.acks.includes(pid)) e.acks.push(pid); }
+      if (g.phase === 'clues' && g.order[g.turn] === i && pr.clue && pr.clue.k === turnKey(g)) { hostClue(String(pr.clue.text || '').slice(0, 60), false); }
+      if (g.phase === 'vote' && g.players[i].alive && e.votes[i] == null && pr.vote && pr.vote.k === e.voteKey && pr.vote.b) {
+        try {
+          const v = await unseal(await keyFor(pid), pr.vote.b);
+          if (v.k === e.voteKey && g.phase === 'vote' && e.votes[i] == null) {
+            const t = Number(v.t);
+            e.votes[i] = (t === -1 || (e.candidates.includes(t) && t !== i)) ? t : -1;
+          }
+        } catch (x) {}
+      }
+      if (g.phase === 'voteResult' && g.guessState === 'pending' && g.lastVote.eliminated === i && pr.guess && pr.guess.k === e.voteKey && pr.guess.t) {
+        e.guessText = String(pr.guess.t).slice(0, 40); hostGuess(R.guessMatches(g, e.guessText));
+      }
+    }
+    if (g.phase === 'vote' && allVoted()) closeVote();
   }
   function aliveIdx(g) { return g.players.map((p, i) => p.alive ? i : -1).filter(i => i >= 0); }
   function allVoted() { const g = jg(), e = jam().extra; return aliveIdx(g).every(i => e.votes[i] != null); }

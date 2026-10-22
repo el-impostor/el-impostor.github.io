@@ -1,5 +1,5 @@
 /* Service worker: la app funciona sin conexión (las salas necesitan internet). */
-const VERSION = 'impostor-20261022142059';
+const VERSION = 'impostor-20261022143123';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
