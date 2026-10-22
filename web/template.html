@@ -29,6 +29,7 @@ img{max-width:100%}
 <script src="vendor/qrcode.min.js"></script>
 <script>
 window.IMPOSTOR_STANDALONE = true;
+window.IMPOSTOR_DONAR = window.IMPOSTOR_DONAR || '__DONAR_URL__';   // enlace de donación (build.py; vacío = sin botón)
 // servidor de salas (server/); build.py pone aquí la dirección.
 // Para probar en local: ?sala-servidor=ws://127.0.0.1:8787 (solo se aceptan servidores locales)
 window.IMPOSTOR_RELAY = window.IMPOSTOR_RELAY || (q => /^ws:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q) ? q : '')(new URLSearchParams(location.search).get('sala-servidor') || '') || '__RELAY_URL__';

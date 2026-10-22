@@ -76,6 +76,8 @@ node test/relay-dev.mjs 8787          # servidor de salas en local para probar a
 - **Inicio:** al pulsar «Jugar con un solo móvil» aparece primero la pantalla «¿Quién juega?», con los últimos nombres y los grupos guardados (`Store.groups`).
 - **Sonidos:** sintetizados con Web Audio (sin archivos); se desactivan en Ajustes.
 
+- **Monetización (de momento):** botón «Invítame a un café» solo en la web, que aparece si `web/donar-url.txt` (o `DONAR_URL`) tiene un enlace `https://`. El servidor cuenta por día salas, partidas y papeles repartidos (Durable Object `Contador`, sin nombres, palabras ni cookies); se ven en `https://impostor-salas.impostor-salas.workers.dev/estadisticas`.
+
 ## Dónde está publicado
 - Web: https://el-impostor.github.io (repositorio `el-impostor/el-impostor.github.io`, organización de GitHub; se publica sola en cada push a `main`).
 - Servidor de salas: `wss://impostor-salas.impostor-salas.workers.dev` (Cloudflare, `npx wrangler deploy` desde `server/`).

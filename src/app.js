@@ -19,6 +19,9 @@
   const rng = R.defaultRng;
   const pickQ = () => QUESTIONS[Math.floor(rng() * QUESTIONS.length)];
   const afterRender = [];
+  // enlace de donación: solo en la versión web y si build.py lo ha configurado (web/donar-url.txt)
+  const DONAR = /^https:\/\/[^\s"'<>]+$/.test(String(window.IMPOSTOR_DONAR || '')) ? window.IMPOSTOR_DONAR : '';
+  const donarLink = txt => DONAR ? `<a class="link donar" href="${esc(DONAR)}" target="_blank" rel="noopener">${txt}</a>` : '';
   /* ---------- sonidos (sintetizados con Web Audio: no hay archivos que cargar) ---------- */
   const Sound = (() => {
     let ctx = null;
@@ -259,6 +262,7 @@
       <div class="home-foot">
         <button class="link" data-a="nav" data-to="help">Cómo se juega</button>
         <button class="link" data-a="nav" data-to="settings">Ajustes</button>
+        ${donarLink('Invítame a un café')}
       </div>
       ${storageOk ? '' : '<p class="note warn">Este navegador no permite guardar datos: las palabras y estadísticas se perderán al cerrar.</p>'}
     </main>`;
@@ -695,6 +699,7 @@
           ${g.clues.length ? `<li>${plural(g.clues.length, 'pista anotada', 'pistas anotadas')}</li>` : ''}
         </ul></section>
     </main>
+    ${DONAR ? `<p class="muted small center">¿Os ha gustado? ${donarLink('Invítame a un café')}</p>` : ''}
     <footer class="bar"><div class="bar-in two"><button class="btn" data-a="end-setup">Cambiar ajustes</button><button class="btn btn-accent" data-a="rematch">Revancha</button></div></footer>`;
   };
 
@@ -743,6 +748,7 @@
         ${row('Guardar estadísticas', 'Historial, victorias y rachas.', sw(st.stats, 'set-tg', 'data-k="stats"'))}</section>
       <section class="sec"><div class="sec-h"><h2>Datos</h2></div>
         <p class="muted small">Todo se guarda solo en este dispositivo. ${plural(Store.used.length, 'palabra ya salida', 'palabras ya salidas')}.</p>
+        ${window.IMPOSTOR_STANDALONE ? '<p class="muted small">En las salas, el servidor solo cuenta cuántas salas y partidas hay al día, sin nombres, palabras ni cookies.</p>' : ''}
         <div class="stack">
           ${confirmBtn('clear-used', 'Olvidar palabras ya salidas', 'Toca otra vez para confirmar', 'clear-used', '')}
           ${confirmBtn('reset-words', 'Restaurar palabras incluidas', 'Se borran tus cambios en las categorías incluidas. Confirmar', 'reset-words', '')}

@@ -1,5 +1,5 @@
 """Pruebas de interfaz en un navegador real (Chromium, viewport de móvil)."""
-import sys, pathlib, re
+import sys, pathlib, re, json
 from playwright.sync_api import sync_playwright
 
 URL = pathlib.Path('dist/impostor.html').resolve().as_uri()
@@ -164,6 +164,25 @@ with sync_playwright() as p:
         if v != 'home': page.evaluate(f"document.querySelector('[data-to={v}]') ? document.querySelector('[data-to={v}]').click() : null")
         ow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
         check(ow <= 0, f'{v}: scroll horizontal {ow}px')
+    # versión web: botón de donación solo si está configurado
+    WEBURL = pathlib.Path('dist/web/index.html').resolve().as_uri()
+    for donar in ['', 'https://ko-fi.com/prueba']:
+        ctx = b.new_context(viewport={'width': 390, 'height': 844})
+        ctx.add_init_script(f"window.IMPOSTOR_DONAR = {json.dumps(donar)};" if donar else '')
+        ctx.route('**/*', lambda r: r.abort() if r.request.url.startswith('http') else r.continue_())
+        pg = ctx.new_page(); pg.on('pageerror', lambda e: errors.append(str(e)))
+        pg.goto(WEBURL); pg.wait_for_timeout(300)
+        links = pg.locator('a.donar')
+        if donar:
+            check(links.count() == 1 and links.get_attribute('href') == donar and links.get_attribute('target') == '_blank', 'web: botón de donación con el enlace configurado')
+            pg.screenshot(path=str(SHOTS / 'home_donar.png'))
+        else:
+            check(links.count() == 0, 'web: sin enlace configurado no hay botón')
+        click(pg, '[data-a="nav"][data-to="settings"]')
+        check('sin nombres, palabras ni cookies' in pg.locator('main').inner_text(), 'web: ajustes explica lo que cuenta el servidor')
+        ctx.close()
+    page.goto(URL); page.wait_for_timeout(200)
+    check(page.locator('a.donar').count() == 0, 'artefacto: sin botón de donación')
     b.close()
 
 print('Errores JS:', errors[:5])
