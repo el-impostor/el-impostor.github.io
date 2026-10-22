@@ -156,7 +156,8 @@
     return list;
   }
   const myIdx = () => { const g = jg(); return g ? g.players.findIndex(p => p.pid === Store.me.pid) : -1; };
-  const turnKey = g => `${g.round}.${g.clueRound}.${g.turn}`;
+  // las claves llevan el id de la partida: así una pista o un voto que siga en la presencia de la partida anterior no cuenta
+  const turnKey = g => `${g.id}.${g.round}.${g.clueRound}.${g.turn}`;
 
   /* ---------- estado público ---------- */
   function timerInfo(g) {
@@ -300,7 +301,7 @@
   }
   function hostStartVote() {
     const g = jg(), e = jam().extra;
-    g.phase = 'vote'; e.votes = {}; e.voteN = 0; e.voteKey = `${g.round}.0`; e.candidates = aliveIdx(g);
+    g.phase = 'vote'; e.votes = {}; e.voteN = 0; e.voteKey = `${g.id}.${g.round}.0`; e.candidates = aliveIdx(g);
     jamStartTimer('vote'); emitState(); render(true);
   }
   function closeVote(timeout) {
@@ -315,7 +316,7 @@
     }
     const t = R.tally(votes, r.tie === 'revote' ? 'revote' : r.tie);
     if (t.revote && e.voteN === 0) {
-      e.voteN = 1; e.voteKey = `${g.round}.1`; e.candidates = t.top; e.votes = {};
+      e.voteN = 1; e.voteKey = `${g.id}.${g.round}.1`; e.candidates = t.top; e.votes = {};
       jamStartTimer('vote'); toast('Empate: se vota otra vez entre los empatados.', 'warn');
       emitState(); return render(true);
     }
@@ -702,7 +703,7 @@
       const s = P.st; if (!s || s.ph !== 'clues' || !P.room) return;
       const i = document.getElementById('p-clue');
       UI.sentClue = `${s.gid}${s.rd}.${s.crd}.${s.t}`;
-      P.room.presence({ clue: { k: `${s.rd}.${s.crd}.${s.t}`, text: i ? i.value.trim().slice(0, 60) : '' } }).catch(() => toast('No se pudo enviar. Inténtalo otra vez.', 'warn'));
+      P.room.presence({ clue: { k: `${s.gid}.${s.rd}.${s.crd}.${s.t}`, text: i ? i.value.trim().slice(0, 60) : '' } }).catch(() => toast('No se pudo enviar. Inténtalo otra vez.', 'warn'));
       render();
     },
     'jp-vote': async el => {

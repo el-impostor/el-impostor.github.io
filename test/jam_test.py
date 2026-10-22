@@ -163,7 +163,12 @@ with sync_playwright() as p:
     players[0].screenshot(path=str(SHOTS / 'jam_player_lobby.png'))
     check('Lucía' in players[1].locator('main').inner_text(), 'los jugadores ven la lista de la sala')
 
-    def play_game(tag, shots=False, reload_mid=False):
+    STALE = []   # votos reales de la primera partida, para reenviarlos en la segunda
+    def peer_of(pg):
+        for room_name, room in members.items():
+            for peer, info in room.items():
+                if info.get('page') is pg: return (room_name, []), info
+    def play_game(tag, shots=False, reload_mid=False, capture=False, replay=False):
         click(host, '[data-a="jh-deal"]'); pump(10)
         hs = store(host); g = hs['jam']['game']
         check(g is not None, f'{tag}: partida creada')
@@ -200,7 +205,7 @@ with sync_playwright() as p:
                 if cur in byname:
                     pg = byname[cur]; pump(2)
                     if shots and guard < 3: pg.screenshot(path=str(SHOTS / 'jam_player_turn.png'))
-                    if pg.locator('#p-clue').count(): pg.fill('#p-clue', 'pista ' + str(guard))
+                    if pg.locator('#p-clue').count(): pg.fill('#p-clue', f'pista {tag[:6]} {guard}')
                     click(pg, '[data-a="jp-clue"]')
                 else:
                     if host.locator('#h-clue').count(): host.fill('#h-clue', 'mía ' + str(guard))
@@ -210,8 +215,18 @@ with sync_playwright() as p:
                 click(host, '[data-a="jh-vote"]'); pump(4)
             elif ph == 'vote':
                 e = store(host)['jam']['extra']
+                if replay and not WEB and g['round'] == 1 and STALE:
+                    # un voto de la partida anterior que sigue en la presencia no debe contar en esta
+                    pg, vote = STALE[0]; peer, info = peer_of(pg)
+                    info['presence'] = dict(info['presence'], vote=vote); broadcast(*peer); pump(4)
+                    idx = [pl['pid'] for pl in g['players']].index(store(pg)['me']['pid'])
+                    check(str(idx) not in store(host)['jam']['extra']['votes'], f'{tag}: no cuenta un voto de la partida anterior')
+                    replay = False
                 for pg in players:
-                    if pg.locator('[data-a="jp-vote"]').count(): pg.locator('[data-a="jp-vote"]').first.click(); pump(2)
+                    if pg.locator('[data-a="jp-vote"]').count():
+                        pg.locator('[data-a="jp-vote"]').first.click(); pump(2)
+                        if capture and not WEB and g['round'] == 1:
+                            STALE.append((pg, dict(peer_of(pg)[1]['presence']['vote'])))
                 if shots and guard < 30: players[0].screenshot(path=str(SHOTS / 'jam_player_voted.png'))
                 if host.locator('[data-a="jh-myvote"]').count(): host.locator('[data-a="jh-myvote"]').first.click()
                 pump(6)
@@ -232,6 +247,8 @@ with sync_playwright() as p:
                 break
         pump(6)
         check(store(host)['jam']['game']['phase'] == 'end', f'{tag}: termina la partida')
+        old = [c['text'] for c in store(host)['jam']['game']['clues'] if c['text'].startswith('pista ') and not c['text'].startswith(f'pista {tag[:6]} ')]
+        check(not old, f'{tag}: no se cuelan pistas de la partida anterior: {old}')
         for pg in players:
             check(view(pg) == 'jamPlayer' and pg.locator('.win').count() == 1, f'{tag}: el jugador ve el final')
         if shots:
@@ -251,7 +268,7 @@ with sync_playwright() as p:
                 if v: check('t' not in v and 'b' in v, f'{tag}: el voto viaja cifrado')
         emits_log.clear()
 
-    play_game('clásico', shots=True)
+    play_game('clásico', shots=True, capture=True)
     # segunda partida: otra configuración y un jugador recarga a mitad
     click(host, '[data-a="jh-new"]'); pump(4)
     click(host, '[data-a="nav"][data-to="setup"]')
@@ -261,7 +278,7 @@ with sync_playwright() as p:
     click(host, '[data-a="back"]')
     check(view(host) == 'jamHost', 'volver de reglas lleva a la sala')
     click(host, '[data-a="rule"][data-k="guess"][data-v=\'"win"\']') if host.locator('[data-a="rule"]').count() else None
-    play_game('pistas limitadas + recarga', reload_mid=True)
+    play_game('pistas limitadas + recarga', reload_mid=True, replay=True)
     b.close()
 
 print('Errores JS:', [e for e in errors][:5])
