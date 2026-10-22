@@ -4,6 +4,23 @@ Juego de deducción social en español de España. Dos formas de jugar:
 - **Un solo móvil**: se pasa el teléfono para ver los papeles.
 - **Sala**: cada jugador en su móvil, entrando por QR o enlace.
 
+## Cómo trabajar en este proyecto
+Estas normas se aplican siempre:
+- **Textos de la interfaz** en español de España, con tono cercano y claro.
+- **`rules.js` es lógica pura:** nada de DOM ni de almacenamiento. Todo cambio de reglas lleva su prueba en `test/rules.test.js`.
+- **Después de cada cambio:** `python3 build.py` y todas las pruebas. Nada se da por terminado con pruebas fallando.
+- **Hay dos versiones que no se pueden romper:**
+  - `dist/impostor.html` (artefacto de Claude):
+    - un único archivo;
+    - scripts externos solo de cdnjs.cloudflare.com, unpkg.com o cdn.jsdelivr.net, y con versión exacta;
+    - nada de `fetch` a otros dominios;
+    - nada de `alert`, `confirm` ni `prompt`.
+  - `dist/web` (PWA): debe seguir funcionando sin conexión en el modo de un solo móvil.
+- **Móvil primero:** todo debe verse bien a 390 px de ancho, sin scroll horizontal, en tema oscuro y claro.
+- **Datos guardados:** si cambia el formato de lo que se guarda en `localStorage`, hay que migrar los datos antiguos. Nadie debe perder sus palabras, grupos ni estadísticas.
+- **Commits:** uno por cambio, con el mensaje en español. No hacer push ni publicar nada sin preguntar.
+- **Cambios grandes:** enseñar antes un plan corto.
+
 ## Dos versiones que salen del mismo código
 - `dist/impostor.html`: artefacto de Claude (claude.ai). La sala usa la capacidad `room` de Claude y solo admite gente con cuenta y acceso compartido. Las imágenes se suben con `assets`.
 - `dist/web/`: versión web independiente (PWA instalable). La sala va móvil a móvil con PeerJS: el móvil del anfitrión hace de centro y no hace falta cuenta. Se sube a un hosting estático (Netlify Drop, GitHub Pages…). `dist/el-impostor-web.zip` es esa carpeta comprimida.
