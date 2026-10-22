@@ -359,9 +359,15 @@ with sync_playwright() as p:
         check(len(LATE) == 1, 'ha entrado alguien tarde'); players.extend(LATE)
     # segunda partida: otra configuración y un jugador recarga a mitad
     click(host, '[data-a="jh-new"]'); pump(4)
-    click(host, '[data-a="nav"][data-to="setup"]')
-    click(host, '[data-a="nav"][data-to="modes"]'); click(host, '[data-a="mode-pick"][data-id="aleatorio"]')
-    click(host, '[data-a="nav"][data-to="setup"]')
+    # entre partidas, el anfitrión cambia modo, categorías y reglas desde la propia sala
+    host.locator('.jam-game').screenshot(path=str(SHOTS / 'jam_lobby_partida.png'))
+    click(host, '.jam-game [data-a="nav"][data-to="modes"]'); click(host, '[data-a="mode-pick"][data-id="aleatorio"]')
+    click(host, '[data-a="back"]')
+    check(view(host) == 'jamHost' and 'impostores aleatorios' in host.locator('.jam-game').inner_text().lower(), 'cambiar el modo desde la sala vuelve a la sala')
+    before = host.locator('.jam-game .chip').count()
+    click(host, '.jam-game [data-a="nav"][data-to="cats"]'); click(host, '[data-a="cat-toggle"][data-id="cine"]'); click(host, '[data-a="back"]')
+    check(view(host) == 'jamHost' and host.locator('.jam-game .chip').count() != before, 'cambiar las categorías desde la sala')
+    click(host, '.jam-game [data-a="nav"][data-to="setup"]')
     host.screenshot(path=str(SHOTS / 'jam_setup.png'), full_page=True)
     click(host, '[data-a="back"]')
     check(view(host) == 'jamHost', 'volver de reglas lleva a la sala')

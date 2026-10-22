@@ -1412,7 +1412,7 @@ const RelayRoom = (() => {
         <span class="mode-tx"><span class="mode-name">${esc(m.name)}</span><span class="mode-tag">${esc(m.tag)}</span>
         ${m.id === cur ? `<span class="mode-how">${esc(m.how)}</span>` : ''}</span>
       </button>`).join('')}</div></main>
-      <footer class="bar"><div class="bar-in"><button class="btn btn-accent big" data-a="nav" data-to="setup" data-replace="1">Continuar con ${esc(R.modeById(cur).name)}</button></div></footer>`;
+      <footer class="bar"><div class="bar-in">${inJam() ? `<button class="btn btn-accent big" data-a="back">Volver a la sala con ${esc(R.modeById(cur).name)}</button>` : `<button class="btn btn-accent big" data-a="nav" data-to="setup" data-replace="1">Continuar con ${esc(R.modeById(cur).name)}</button>`}</div></footer>`;
   };
 
   /* ---------- 3. Configuración (jugadores + reglas) ---------- */
@@ -2900,15 +2900,25 @@ const RelayRoom = (() => {
           ${row('Yo también juego', 'Tu papel lo verás en este móvil.', sw(j.hostPlays, 'jh-plays'))}
           ${j.hostPlays ? `<label class="lbl" for="host-name">Tu nombre</label><input class="inp" id="host-name" data-in="host-name" maxlength="20" value="${esc(Store.me.name || '')}">` : ''}
         </section>
+        <section class="sec jam-game"><div class="sec-h"><h2>Partida</h2></div>
+          <button class="modecard" data-a="nav" data-to="modes">
+            <span class="mode-n">${String(R.modeById(s.mode).n).padStart(2, '0')}</span>
+            <span class="mode-tx"><span class="mode-name">${esc(R.modeById(s.mode).name)}</span><span class="mode-tag">${esc(R.modeById(s.mode).tag)} · Cambiar</span></span>
+          </button>
+          <div class="sec-h"><h2>Categorías <span class="count">${s.cats.length}</span></h2><button class="link" data-a="nav" data-to="cats">Elegir</button></div>
+          ${ap && ap.on && ap.only ? '<p class="muted small">Esta vez solo se juega con lo que aporten los jugadores.</p>'
+            : `<div class="chips">${catalog().filter(c => s.cats.includes(c.id)).map(c => `<span class="chip" style="--c:${catColor(c.h)}">${esc(c.name)}</span>`).join('') || '<span class="muted">Ninguna seleccionada</span>'}${ap && ap.on ? '<span class="chip plain">+ aportaciones</span>' : ''}</div>`}
+          <p class="muted">${impLabel(s, on.length)}</p>
+          <div class="row-btns"><button class="btn ghost sm" data-a="nav" data-to="setup">Reglas, impostores y tiempos</button><button class="btn ghost sm" data-a="nav" data-to="words">Palabras</button></div>
+          ${v.ok ? '' : `<p class="note warn">${esc(v.errors[0])}</p>`}${v.warnings.length ? `<p class="note small">${esc(v.warnings[0])}</p>` : ''}
+          <p class="muted small">Puedes cambiar todo esto antes de cada partida.</p>
+        </section>
         ${ap ? `<section class="sec"><div class="sec-h"><h2>Aportaciones</h2></div>
           ${row('Los jugadores aportan palabras y fotos', `Hasta ${AP_MAX} cada uno, desde su móvil. Tú solo verás quién está listo, no lo que aporta.`, sw(ap.on, 'jh-ap'))}
           ${ap.on ? `<div class="seg" role="radiogroup">${[[0, 'Mezclar con las categorías'], [1, 'Solo lo que aporten']].map(([x, l]) => `<button role="radio" aria-checked="${!!ap.only === !!x}" class="seg-b${!!ap.only === !!x ? ' on' : ''}" data-a="jh-ap-only" data-v="${x}">${l}</button>`).join('')}</div>
             <p class="muted small">Puedes repartir cuando quieras, aunque no estén todos listos.</p>` : ''}
         </section>` : ''}
-        <section class="sec"><div class="sec-h"><h2>Partida</h2><button class="link" data-a="nav" data-to="setup">Reglas y categorías</button></div>
-          <p class="muted">${esc(R.modeById(s.mode).name)} · ${impLabel(s, on.length)} · ${ap && ap.on && ap.only ? 'solo lo que aporten' : plural(s.cats.length, 'categoría') + (ap && ap.on ? ' + aportaciones' : '')}</p>
-          ${v.ok ? '' : `<p class="note warn">${esc(v.errors[0])}</p>`}${v.warnings.length ? `<p class="note small">${esc(v.warnings[0])}</p>` : ''}
-        </section>${exitBox}
+${exitBox}
       </main>
       <footer class="bar"><div class="bar-in"><button class="btn btn-accent big" data-a="jh-deal" ${v.ok && J.room ? '' : 'disabled'}>Repartir papeles</button></div></footer>`;
     }

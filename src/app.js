@@ -291,7 +291,7 @@
         <span class="mode-tx"><span class="mode-name">${esc(m.name)}</span><span class="mode-tag">${esc(m.tag)}</span>
         ${m.id === cur ? `<span class="mode-how">${esc(m.how)}</span>` : ''}</span>
       </button>`).join('')}</div></main>
-      <footer class="bar"><div class="bar-in"><button class="btn btn-accent big" data-a="nav" data-to="setup" data-replace="1">Continuar con ${esc(R.modeById(cur).name)}</button></div></footer>`;
+      <footer class="bar"><div class="bar-in">${inJam() ? `<button class="btn btn-accent big" data-a="back">Volver a la sala con ${esc(R.modeById(cur).name)}</button>` : `<button class="btn btn-accent big" data-a="nav" data-to="setup" data-replace="1">Continuar con ${esc(R.modeById(cur).name)}</button>`}</div></footer>`;
   };
 
   /* ---------- 3. Configuración (jugadores + reglas) ---------- */
