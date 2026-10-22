@@ -82,6 +82,7 @@ def log_up(name, msg):
     try: m = json.loads(msg)
     except Exception: return
     if m.get('t') == 'emit': emits_log.append({'topic': m['topic'], 'data': m['data']})
+    if m.get('t') == 'send': sends_log.append(m)
     if m.get('t') in ('pres', 'hello') and isinstance(m.get('presence'), dict): members.setdefault('web', {})[name] = {'presence': m['presence']}
 def cut(name):
     """El móvil pierde la cobertura: se corta su conexión y no puede reconectar hasta restore()."""
@@ -97,7 +98,7 @@ SLOW_DECRYPT = r"""
 (() => { const d = SubtleCrypto.prototype.decrypt;
   SubtleCrypto.prototype.decrypt = function (...a) { return new Promise(r => setTimeout(r, 150)).then(() => d.apply(this, a)); }; })();
 """
-queue, members, emits_log = [], {}, []   # members[room] = {peer: {'page':page,'presence':{}}}
+queue, members, emits_log, sends_log = [], {}, [], []   # members[room] = {peer: {'page':page,'presence':{}}}
 def pump(rounds=6, wait=60):
     any_page = next(iter(pages.values()))
     for _ in range(rounds):
@@ -365,8 +366,43 @@ with sync_playwright() as p:
     click(host, '[data-a="back"]')
     check(view(host) == 'jamHost', 'volver de reglas lleva a la sala')
     click(host, '[data-a="rule"][data-k="guess"][data-v=\'"win"\']') if host.locator('[data-a="rule"]').count() else None
+    AP_WORDS = []
+    if WEB:
+        # ---------- aportaciones de los jugadores ----------
+        pills = lambda: host.locator('.mem .pill').all_inner_texts()
+        click(host, '[data-a="jh-ap"]'); pump(4)
+        check(wait_until(lambda: all(pg.locator('#ap-w').count() for pg in players), 10), 'los jugadores ven dónde aportar')
+        check(pills() == ['Aún no'] * len(players), f'el anfitrión ve que nadie está listo: {pills()}')
+        for i, pg in enumerate(players):
+            w = f'Aportada{i}'; AP_WORDS.append(w)
+            pg.fill('#ap-w', w); pg.fill('#ap-s', f'Parecida{i}'); click(pg, '[data-a="ap-add"]'); pump(1)
+        players[0].set_input_files('#ap-img', 'web/icon-192.png')
+        check(wait_until(lambda: players[0].locator('.ap-sec .wthumb').count() == 1, 10), 'se puede aportar una foto')
+        players[0].locator('.ap-sec').screenshot(path=str(SHOTS / 'jam_player_aportaciones.png'))
+        full = players[2]
+        while full.locator('.ap-sec .wr').count() < 20:
+            k = full.locator('.ap-sec .wr').count(); w = f'Relleno{k}'; AP_WORDS.append(w)
+            full.fill('#ap-w', w); click(full, '[data-a="ap-add"]'); pump(1)
+        check(full.locator('#ap-w').is_disabled() and full.locator('[data-a="ap-add"]').is_disabled(), 'como mucho 20 aportaciones')
+        # Marco pulsa «Listo» sin conexión: llega al reconectar
+        off = players[1]; n = name_of(off); cut(n); wait_until(lambda: 'Sin conexión' in note(off), 10)
+        for pg in players: click(pg, '[data-a="ap-ready"]'); pump(2)
+        pump(10)
+        check(pills().count('Listo') == len(players) - 1, f'sin conexión todavía no cuenta como listo: {pills()}')
+        restore(n)
+        check(wait_until(lambda: pills() == ['Listo'] * len(players), 25), f'al reconectar llega lo que aportó: {pills()}')
+        host.screenshot(path=str(SHOTS / 'jam_host_aportaciones.png'), full_page=True)
+        txt = host.locator('main').inner_text()
+        check(not any(w in txt for w in AP_WORDS) and 'icon 192' not in txt, 'el anfitrión no ve lo que aportan')
+        check(sends_log and not any(w in json.dumps(sends_log) for w in AP_WORDS), 'las aportaciones viajan cifradas')
+        check(all(set(m['data']) == {'pid', 'v', 'part', 'of', 'chunk'} for m in sends_log), 'solo datos cifrados hacia el anfitrión')
+        click(host, '[data-a="jh-ap-only"][data-v="1"]'); pump(4)
+        check(host.locator('[data-a="jh-deal"]').is_enabled(), 'se puede repartir con lo aportado')
     play_game('pistas limitadas + recarga', reload_mid=True, replay=True, faults='g2' if WEB else None)
-    if WEB: check(len(store(host)['jam']['game']['players']) == 5, 'quien entró tarde juega la partida siguiente')
+    if WEB:
+        check(len(store(host)['jam']['game']['players']) == 5, 'quien entró tarde juega la partida siguiente')
+        sw = store(host)['jam']['game']['secret']['w']
+        check(sw in AP_WORDS + ['icon 192'], f'con «solo lo que aporten» sale una aportación: {sw}')
     b.close()
 
 print('Errores JS:', [e for e in errors][:5])

@@ -12,11 +12,15 @@
        una clave de sala a cada jugador (tema "rk"), así el servidor solo ve
        nombres y bloques cifrados. También avisa de desconexiones y mantiene
        la pantalla encendida mientras haya sala.
+     - Aportaciones (solo web): si el anfitrión lo permite, cada jugador aporta
+       hasta 20 palabras o fotos y pulsa «Listo». Le llegan al anfitrión
+       cifradas (tema "ap", por trozos) y se reenvían hasta que el estado
+       confirma que han llegado (apk). El anfitrión solo ve quién está listo.
      ========================================================= */
   const ARTIFACT_URL = 'https://claude.ai/artifact/DiyBH86ezmKyiXWsB1nffh';
   const STANDALONE = typeof window !== 'undefined' && window.IMPOSTOR_STANDALONE === true;
   const Caps = { room: null, user: null, assets: null, canEdit: false, ready: false, standalone: STANDALONE, jamData: STANDALONE };
-  const J = { room: null, keys: {}, pres: {}, online: new Set(), timer: null, connecting: false, err: '' }; // anfitrión (vivo)
+  const J = { room: null, keys: {}, pres: {}, online: new Set(), timer: null, connecting: false, err: '', contrib: {}, parts: {} }; // anfitrión (vivo)
   const P = { room: null, st: null, stAt: 0, hostKey: null, hostPub: '', connecting: false, err: '', lastSt: '' };   // jugador (vivo)
 
   /* ---------- capacidades ---------- */
@@ -81,6 +85,23 @@
     replaced: 'Has abierto esta sala en otra pestaña o en otro móvil.',
     closed: 'El anfitrión ha cerrado la sala.'
   };
+  const AP_MAX = 20, AP_CHUNK = 120000;
+  /* aportaciones de los jugadores (anfitrión, solo en memoria: si recarga, los jugadores las reenvían) */
+  const apOn = () => STANDALONE && !!(jam() && jam().ap && jam().ap.on);
+  const apItems = () => { const j = jam(); return j.order.filter(pid => !j.kicked.includes(pid) && J.contrib[pid]).flatMap(pid => J.contrib[pid].items); };
+  /* catálogo y configuración de la sala: con las aportaciones como una categoría más (o la única) */
+  function jamCfg(players) {
+    const s = setup(), cfg = Object.assign({}, s, { players, jam: !Caps.jamData });
+    let cat = catalog();
+    if (apOn()) {
+      cat = cat.concat([R.contribCategory(apItems())]);
+      cfg.cats = jam().ap.only ? [R.CONTRIB_ID] : s.cats.concat(R.CONTRIB_ID);
+    }
+    const info = R.buildPool(cat, cfg, Store.used), v = R.validate(cfg, info);
+    if (apOn() && jam().ap.only && !apItems().length) v.errors.unshift('Aún no ha llegado ninguna aportación de los jugadores.'), v.ok = false;
+    return { cfg, info, v };
+  }
+  const apReady = pid => { const pr = J.pres[pid] || {}, c = J.contrib[pid]; return !!(pr.apr && c && pr.apr === c.v); };
   const wakeWhileJam = () => { if (STANDALONE && (Store.jam || Store.join)) requestWake(); };
   const releaseIfIdle = () => { if (!(Store.game && Store.game.phase !== 'end')) releaseWake(); };
 
@@ -133,6 +154,7 @@
       if (E2E && !jam().rk) jam().rk = newRoomKey();
       J.room = await Caps.room.join(roomName(jam().code), STANDALONE ? { hub: true, token: jam().tok } : { hub: true });
       J.room.presence({ host: jam().code, hp: jam().hk.pub }).catch(() => {});
+      if (STANDALONE) J.room.on('ap', m => onContrib(m));
       J.room.onPeers(onHostPeers, e => {
         J.err = e.code === 'expired' ? 'La sala había caducado. Pulsa Reconectar para abrirla otra vez con el mismo código.' : (e.code === 'replaced' ? JAM_ERR.replaced : e.message || e.code);
         J.room = null; renderSoon();
@@ -151,7 +173,7 @@
     const room = J.room;
     // en la web, el servidor borra la sala al recibir "bye" y avisa a los jugadores
     try { if (room) { if (STANDALONE) room.emit('bye', { c: jam().code }).catch(() => {}); setTimeout(() => room.leave(), STANDALONE ? 300 : 0); } } catch (e) {}
-    clearInterval(J.timer); J.room = null; J.keys = {}; J.pres = {}; J.online = new Set(); J.status = null;
+    clearInterval(J.timer); J.room = null; J.keys = {}; J.pres = {}; J.online = new Set(); J.status = null; J.contrib = {}; J.parts = {};
     Store.jam = null; save(); releaseIfIdle();
   }
   let lastHostEmit = 0, lastCardSend = 0;
@@ -195,6 +217,25 @@
     if (gone.length) toast(`${gone.map(nameOf).join(', ')} ${gone.length === 1 ? 'se ha desconectado' : 'se han desconectado'}.`, 'warn');
     else if (back.length) toast(`${back.map(nameOf).join(', ')} ${back.length === 1 ? 'ha vuelto' : 'han vuelto'}.`);
   }
+  /* aportación de un jugador: llega por trozos, cifrada para el anfitrión */
+  async function onContrib(m) {
+    const d = m.data, j = jam();
+    if (!j || !d || typeof d.pid !== 'string' || typeof d.v !== 'string' || !j.members[d.pid] || j.kicked.includes(d.pid)) return;
+    const n = Number(d.of), i = Number(d.part);
+    if (!(n >= 1 && n <= 40 && i >= 0 && i < n) || typeof d.chunk !== 'string') return;
+    let b = J.parts[d.pid];
+    if (!b || b.v !== d.v || b.n !== n) b = J.parts[d.pid] = { v: d.v, n, chunks: [] };
+    b.chunks[i] = d.chunk;
+    if (b.chunks.filter(x => typeof x === 'string').length < n) return;
+    delete J.parts[d.pid];
+    try {
+      const got = await unseal(await keyFor(d.pid), JSON.parse(b.chunks.join('')));
+      if (got.v !== d.v || !Array.isArray(got.items)) return;
+      const items = got.items.slice(0, AP_MAX).map(a => ({ id: String(a.id || '').slice(0, 24), w: String(a.w || '').slice(0, 40), sim: String(a.sim || '').slice(0, 40), data: typeof a.data === 'string' && a.data.startsWith('data:image/') && a.data.length < 200000 ? a.data : '' }));
+      J.contrib[d.pid] = { v: d.v, items };
+      emitState(); renderSoon();
+    } catch (e) {}
+  }
   /* reparte la clave de sala a quien aún no la tiene (solo versión web) */
   async function sendKeys() {
     const j = jam(); if (!E2E || !j || !j.rk || !J.room) return;
@@ -227,6 +268,7 @@
   function pubState() {
     const j = jam(), g = j.game, e = j.extra;
     const s = { c: j.code, seq: ++j.seq, hp: j.hk.pub, ph: g ? g.phase : 'lobby', gid: g ? g.id : '' };
+    if (apOn()) { s.ap = { only: j.ap.only ? 1 : 0 }; s.apk = {}; Object.keys(J.contrib).forEach(pid => { s.apk[pid] = J.contrib[pid].v; }); }
     if (!g) { s.pl = lobbyMembers().map(m => ({ p: m.pid, n: m.n, h: m.host ? 1 : 0 })); s.mode = R.modeById(setup().mode).name; return s; }
     const r = g.rules;
     s.mode = R.modeById(g.mode).name;
@@ -322,9 +364,8 @@
 
   /* ---------- motor de la partida (anfitrión) ---------- */
   async function hostDeal() {
-    const j = jam(), s = setup(), mem = lobbyMembers().filter(m => m.on);
-    const cfg = Object.assign({}, s, { players: mem.map(m => m.n), jam: !Caps.jamData });
-    const info = R.buildPool(catalog(), cfg, Store.used), v = R.validate(cfg, info);
+    const j = jam(), mem = lobbyMembers().filter(m => m.on);
+    const { cfg, info, v } = jamCfg(mem.map(m => m.n));
     if (!v.ok) return toast(v.errors[0], 'warn');
     if (info.recycled) { const keys = new Set(info.pool.map(p => p.key)); Store.used = Store.used.filter(k => !keys.has(k)); }
     const g = R.createGame(cfg, info.pool, undefined, info.alts);
@@ -477,7 +518,7 @@
   }
   function playerLeave() {
     try { if (P.room) P.room.leave(); } catch (e) {}
-    P.room = null; P.st = null; P.lastSt = ''; P.rk = null; P.pendingSt = null; P.status = null; Store.join = null; Store.myCard = null; save(); releaseIfIdle();
+    P.room = null; P.st = null; P.lastSt = ''; P.rk = null; P.pendingSt = null; P.status = null; Store.join = null; Store.myCard = null; Store.myAp = null; save(); releaseIfIdle();
     try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
   }
   function onPlayerState(m) {
@@ -568,7 +609,7 @@
     const myCardBtn = meIn && g.phase !== 'end' ? `<button class="btn ghost sm" data-a="my-card">${UI.myCard ? 'Ocultar mi papel' : 'Ver mi papel'}</button>` : '';
     const myCard = meIn && UI.myCard && g.phase !== 'end' ? cardBlock(R.cardFor(g, mi), g.players[mi].name, 'Tu papel', UI.cardOpen) : '';
     if (!g) {
-      const jf = !Caps.jamData, mem = lobbyMembers(), on = mem.filter(m => m.on), s = setup(), v = R.validate(Object.assign({}, s, { players: on.map(m => m.n), jam: jf }), R.buildPool(catalog(), Object.assign({}, s, { jam: jf }), Store.used));
+      const mem = lobbyMembers(), on = mem.filter(m => m.on), s = setup(), v = jamCfg(on.map(m => m.n)).v, ap = STANDALONE ? (j.ap || {}) : null;
       return head + `<main class="pad jam">
         ${jamBar(j.code, conn)}
         ${J.err ? `<p class="note warn">${esc(J.err)}</p>` : ''}
@@ -577,12 +618,17 @@
           <div class="link-row"><input class="inp" id="join-link" readonly value="${esc(joinUrl(j.code))}" aria-label="Enlace de la sala"><button class="btn sm" data-a="copy-link">Copiar</button></div></div></section>
         <p class="note small">${STANDALONE ? 'Cualquiera puede entrar con el QR o el enlace, sin cuenta. Deja esta pantalla abierta: tu móvil hace de servidor de la partida.' : 'Cada jugador necesita abrir el enlace con su cuenta de Claude y tener acceso a esta app (compártela con ellos desde el menú Compartir).'}</p>
         <section class="sec"><div class="sec-h"><h2>Jugadores <span class="count">${on.length}</span></h2></div>
-          <ul class="mem">${mem.map(m => `<li class="${m.on ? '' : 'off'}"><span class="mem-dot"></span><span class="mem-n">${esc(m.n)}${m.host ? ' <small>(tú)</small>' : ''}</span>${m.host ? '' : `<button class="icon-btn sm" data-a="jh-kick" data-id="${esc(m.pid)}" aria-label="Echar a ${esc(m.n)}">${icon.close}</button>`}</li>`).join('') || '<li class="muted">Esperando a que entre gente…</li>'}</ul>
+          <ul class="mem">${mem.map(m => `<li class="${m.on ? '' : 'off'}"><span class="mem-dot"></span><span class="mem-n">${esc(m.n)}${m.host ? ' <small>(tú)</small>' : ''}</span>${ap && ap.on && !m.host ? `<span class="pill${apReady(m.pid) ? '' : ' wrn-p'}">${apReady(m.pid) ? 'Listo' : 'Aún no'}</span>` : ''}${m.host ? '' : `<button class="icon-btn sm" data-a="jh-kick" data-id="${esc(m.pid)}" aria-label="Echar a ${esc(m.n)}">${icon.close}</button>`}</li>`).join('') || '<li class="muted">Esperando a que entre gente…</li>'}</ul>
           ${row('Yo también juego', 'Tu papel lo verás en este móvil.', sw(j.hostPlays, 'jh-plays'))}
           ${j.hostPlays ? `<label class="lbl" for="host-name">Tu nombre</label><input class="inp" id="host-name" data-in="host-name" maxlength="20" value="${esc(Store.me.name || '')}">` : ''}
         </section>
+        ${ap ? `<section class="sec"><div class="sec-h"><h2>Aportaciones</h2></div>
+          ${row('Los jugadores aportan palabras y fotos', `Hasta ${AP_MAX} cada uno, desde su móvil. Tú solo verás quién está listo, no lo que aporta.`, sw(ap.on, 'jh-ap'))}
+          ${ap.on ? `<div class="seg" role="radiogroup">${[[0, 'Mezclar con las categorías'], [1, 'Solo lo que aporten']].map(([x, l]) => `<button role="radio" aria-checked="${!!ap.only === !!x}" class="seg-b${!!ap.only === !!x ? ' on' : ''}" data-a="jh-ap-only" data-v="${x}">${l}</button>`).join('')}</div>
+            <p class="muted small">Puedes repartir cuando quieras, aunque no estén todos listos.</p>` : ''}
+        </section>` : ''}
         <section class="sec"><div class="sec-h"><h2>Partida</h2><button class="link" data-a="nav" data-to="setup">Reglas y categorías</button></div>
-          <p class="muted">${esc(R.modeById(s.mode).name)} · ${impLabel(s, on.length)} · ${plural(s.cats.length, 'categoría')}</p>
+          <p class="muted">${esc(R.modeById(s.mode).name)} · ${impLabel(s, on.length)} · ${ap && ap.on && ap.only ? 'solo lo que aporten' : plural(s.cats.length, 'categoría') + (ap && ap.on ? ' + aportaciones' : '')}</p>
           ${v.ok ? '' : `<p class="note warn">${esc(v.errors[0])}</p>`}${v.warnings.length ? `<p class="note small">${esc(v.warnings[0])}</p>` : ''}
         </section>${exitBox}
       </main>
@@ -677,7 +723,8 @@
     if (s.ph === 'lobby') {
       body = `<div class="pass"><div class="pass-k">Estás dentro</div><h2 class="big-h">Esperando a que empiece</h2><p class="muted">Modo ${esc(s.mode || '')}</p></div>
         <ul class="mem">${pl.map(p => `<li><span class="mem-dot"></span><span class="mem-n">${esc(p.n)}${p.p === Store.me.pid ? ' <small>(tú)</small>' : ''}${p.h ? ' <small>(anfitrión)</small>' : ''}</span></li>`).join('')}</ul>
-        ${pl.some(p => p.p === Store.me.pid) ? '' : '<p class="note">Aún no apareces en la lista. Espera unos segundos.</p>'}`;
+        ${pl.some(p => p.p === Store.me.pid) ? '' : '<p class="note">Aún no apareces en la lista. Espera unos segundos.</p>'}
+        ${s.ap ? apSection(s) : ''}`;
     } else if (me < 0) {
       body = `<div class="pass"><h2 class="big-h">Partida en curso</h2><p class="muted">Ya había empezado cuando entraste. Jugarás en la siguiente.</p></div>`;
     } else if (s.ph === 'reveal') {
@@ -747,6 +794,57 @@
   V.jamHost = withNotice(V.jamHost, hostNotice);
   V.jamPlayer = withNotice(V.jamPlayer, playerNotice);
 
+  /* ---------- aportaciones (jugador) ---------- */
+  function myAp() {
+    const code = Store.join && Store.join.code;
+    if (!Store.myAp || Store.myAp.code !== code) Store.myAp = { code, items: [], v: '', ready: false };
+    return Store.myAp;
+  }
+  const apAck = s => !!(s && s.apk && Store.me && myAp().v && s.apk[Store.me.pid] === myAp().v);
+  function apSection(s) {
+    const a = myAp(), n = a.items.length, full = n >= AP_MAX;
+    const item = it => `<li class="wr">${it.data ? picTag(it.data, it.w, 'wthumb') : ''}<span class="wr-tx"><span class="wr-w">${esc(it.w)}</span>${it.sim ? `<span class="wr-s">parecida: ${esc(it.sim)}</span>` : ''}</span>
+      ${a.ready ? '' : `<button class="icon-btn sm" data-a="ap-del" data-id="${esc(it.id)}" aria-label="Quitar ${esc(it.w)}">${icon.trash}</button>`}</li>`;
+    return `<section class="sec ap-sec"><div class="sec-h"><h2>Tus aportaciones <span class="count">${n}/${AP_MAX}</span></h2></div>
+      <p class="muted small">Palabras o fotos que pueden salir en esta sala${s.ap.only ? ' (solo se juega con lo que aportéis)' : ', mezcladas con las categorías'}. El anfitrión no ve lo que aportas.</p>
+      ${a.ready ? '' : `<div class="addw"><input class="inp" id="ap-w" data-keep="1" maxlength="40" autocomplete="off" placeholder="Palabra" aria-label="Palabra que aportas" ${full ? 'disabled' : ''}>
+        <input class="inp" id="ap-s" data-keep="1" maxlength="40" autocomplete="off" placeholder="Parecida (opcional)" aria-label="Palabra parecida" ${full ? 'disabled' : ''}>
+        <button class="btn btn-accent" data-a="ap-add" ${full ? 'disabled' : ''}>Añadir</button></div>
+        <label class="btn ghost${full ? ' is-locked' : ''}" for="ap-img">${icon.plus} ${UI.apBusy ? 'Preparando fotos…' : 'Añadir fotos'}</label>
+        <input type="file" id="ap-img" accept="image/*" multiple class="vh" ${full ? 'disabled' : ''}>`}
+      ${n ? `<ul class="wlist">${a.items.map(item).join('')}</ul>` : ''}
+      <button class="btn big${a.ready ? '' : ' btn-accent'}" data-a="ap-ready">${a.ready ? 'Cambiar mis aportaciones' : 'Listo'}</button>
+      ${a.ready ? `<p class="note center">${apAck(s) ? 'Listo. Esperando a que el anfitrión reparta…' : 'Enviando…'}</p>` : ''}
+    </section>`;
+  }
+  function apChanged() { const a = myAp(); a.v = ''; a.ready = false; if (P.room) P.room.presence({ apr: null }).catch(() => {}); save(); render(); }
+  async function addApPhotos(files) {
+    const a = myAp(); UI.apBusy = true; render(); let added = 0;
+    for (const f of files) {
+      if (a.items.length >= AP_MAX) { toast(`Como mucho ${AP_MAX} aportaciones.`, 'warn'); break; }
+      if (!/^image\//.test(f.type)) continue;
+      try { const small = await shrink(f, 360, 0.62); a.items.push({ id: uid(), w: f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 40) || 'Foto', sim: '', data: small.data }); added++; } catch (e) {}
+    }
+    UI.apBusy = false;
+    if (added) apChanged(); else render();
+  }
+  /* enviar (y reenviar hasta que el anfitrión confirme) lo aportado */
+  let apSentAt = 0;
+  async function sendContrib(force) {
+    const a = myAp(), s = P.st;
+    if (!STANDALONE || !a.ready || !a.v || !P.room || !P.room.send || !P.room.connected() || !s || !s.ap || !P.hostPub || apAck(s)) return;
+    if (!force && Date.now() - apSentAt < 6000) return;
+    apSentAt = Date.now();
+    try {
+      const box = JSON.stringify(await seal(await hostKeyP(), { v: a.v, items: a.items }));
+      const n = Math.ceil(box.length / AP_CHUNK) || 1;
+      for (let i = 0; i < n; i++) P.room.send('ap', { pid: Store.me.pid, v: a.v, part: i, of: n, chunk: box.slice(i * AP_CHUNK, (i + 1) * AP_CHUNK) });
+    } catch (e) { apSentAt = 0; }
+  }
+  setInterval(() => sendContrib(false), 2000);
+  $app.addEventListener('change', e => { if (e.target.id === 'ap-img' && e.target.files && e.target.files.length) addApPhotos([...e.target.files]); });
+  $app.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target.id === 'ap-w' || e.target.id === 'ap-s')) { e.preventDefault(); A['ap-add'](); } });
+
   /* ---------- QR ---------- */
   function drawQr() {
     const el = document.getElementById('qr'), j = jam();
@@ -766,6 +864,25 @@
     'jh-exit-ask': () => { UI.confirm = 'jh-exit'; render(); },
     'jh-close': () => { hostLeave(); UI.stack = []; go('home', {}, true); },
     'jh-plays': () => { jam().hostPlays = !jam().hostPlays; emitState(); render(); },
+    'jh-ap': () => { const j = jam(); j.ap = Object.assign({ on: false, only: false }, j.ap); j.ap.on = !j.ap.on; emitState(); render(); },
+    'jh-ap-only': el => { const j = jam(); j.ap.only = el.dataset.v === '1'; emitState(); render(); },
+    'ap-add': () => {
+      const a = myAp(), w = document.getElementById('ap-w'), sm = document.getElementById('ap-s');
+      const word = (w && w.value || '').trim().slice(0, 40), sim = (sm && sm.value || '').trim().slice(0, 40);
+      if (!word) return toast('Escribe una palabra.', 'warn');
+      if (a.items.length >= AP_MAX) return toast(`Como mucho ${AP_MAX} aportaciones.`, 'warn');
+      if (a.items.some(x => !x.data && R.norm(x.w) === R.norm(word))) return toast('Esa palabra ya la has aportado.', 'warn');
+      a.items.push({ id: uid(), w: word, sim, data: '' }); w.value = ''; if (sm) sm.value = '';
+      apChanged(); setTimeout(() => { const i = document.getElementById('ap-w'); if (i) i.focus(); }, 30);
+    },
+    'ap-del': el => { const a = myAp(); a.items = a.items.filter(x => x.id !== el.dataset.id); apChanged(); },
+    'ap-ready': () => {
+      const a = myAp();
+      if (a.ready) return apChanged();
+      a.v = uid(); a.ready = true; save();
+      if (P.room) P.room.presence({ apr: a.v }).catch(() => {});
+      render(); sendContrib(true);
+    },
     'jh-kick': el => { const j = jam(); j.kicked.push(el.dataset.id); j.order = j.order.filter(p => p !== el.dataset.id); emitState(); render(); },
     'copy-link': () => {
       const url = joinUrl(jam().code), inp = document.getElementById('join-link');
