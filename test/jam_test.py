@@ -271,11 +271,20 @@ with sync_playwright() as p:
             if m['topic'] == 'card':
                 check(set(m['data']) == {'to', 'gid', 'iv', 'ct'}, f'{tag}: la tarjeta solo lleva datos cifrados: {sorted(m["data"])}')
                 check(not word_re.search(json.dumps(m['data'], ensure_ascii=False)), f'{tag}: la tarjeta viaja cifrada')
-        # votos cifrados en la presencia
+        if WEB:
+            # en la web el servidor de salas no debe poder leer nada de la partida
+            sts = [m['data'] for m in emits_log if m['topic'] == 'st']
+            check(sts and all(set(d) == {'c', 'hp', 'k', 'enc'} for d in sts), f'{tag}: todo el estado público viaja cifrado')
+            check(not any(word_re.search(json.dumps(m['data'], ensure_ascii=False)) for m in emits_log), f'{tag}: la palabra no aparece en nada de lo que emite el anfitrión')
+        # votos (y en la web también pistas e intentos) cifrados en la presencia
         for room in members.values():
             for info in room.values():
                 v = info['presence'].get('vote')
                 if v: check('t' not in v and 'b' in v, f'{tag}: el voto viaja cifrado')
+                if WEB:
+                    for k in ('clue', 'guess'):
+                        x = info['presence'].get(k)
+                        if x: check('b' in x and 'text' not in x and 't' not in x, f'{tag}: {k} viaja cifrado')
         emits_log.clear()
 
     play_game('clásico', shots=True, capture=True)

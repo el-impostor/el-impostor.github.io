@@ -69,6 +69,11 @@ export class Sala extends DurableObject {
     if (m.t === 'emit' && me.r === 'hub' && typeof m.topic === 'string') {
       const out = JSON.stringify({ t: 'emit', topic: m.topic, data: m.data });
       for (const c of this.clients()) { try { c.send(out); } catch (e) {} }
+      if (m.topic === 'bye') {   // el anfitrión cierra la sala: se borra y se echa a todos
+        await this.ctx.storage.deleteAll(); this.pres = null; this.lastSt = null; this.alarmAt = 0;
+        for (const w of this.ctx.getWebSockets()) this.fail(w, 'closed');
+        return;
+      }
       if (m.topic === 'st') {
         this.lastSt = m.data;
         if (Date.now() - this.stSaved > 10000) { this.stSaved = Date.now(); await this.ctx.storage.put('st', m.data); }

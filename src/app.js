@@ -1201,6 +1201,7 @@
     const g = Store.game;
     if (document.hidden && g && g.cardOpen) { g.cardOpen = false; setCard(); }
     if (!document.hidden && g && g.phase !== 'end') requestWake();
+    if (!document.hidden) wakeWhileJam();
   });
 
   /* ---------- tema ---------- */

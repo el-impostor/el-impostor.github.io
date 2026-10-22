@@ -101,6 +101,14 @@ try {
     h.close(); a2.close();
   });
 
+  await t('el anfitrión cierra la sala: avisa y el código deja de valer', async () => {
+    const r = room(), h = await hub(r), a = await client(r, 'jugadora04');
+    h.send({ t: 'emit', topic: 'bye', data: { c: 'x' } });
+    await a.wait(m => m.t === 'error' && m.code === 'closed');
+    const late = await client(r, 'jugadora05');
+    assert.strictEqual(late.got[0].code, 'not_found');
+  });
+
   await t('latido: ping → pong', async () => {
     const r = room(), h = await hub(r); h.send('ping'); await h.wait(m => m.t === 'pong'); h.close();
   });

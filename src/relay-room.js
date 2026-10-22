@@ -19,6 +19,7 @@ const RelayRoom = (() => {
     full: 'La sala está llena.',
     expired: 'La sala ha caducado por falta de actividad.',
     replaced: 'La sala se ha abierto en otro móvil o pestaña.',
+    closed: 'El anfitrión ha cerrado la sala.',
     id_taken: 'Ese código ya lo usa otra sala.',
     too_big: 'Un mensaje era demasiado grande.',
     bad_token: 'No se pudo abrir la sala.',

@@ -2126,6 +2126,11 @@ if (false) module.exports = Rules;
        "listo", pista, voto (cifrado) e intento de adivinar.
      - Cifrado: ECDH P-256 + AES-GCM. Cada tarjeta y cada voto solo los puede
        leer su destinatario.
+     - Versión web (servidor de salas en server/): además, el estado público,
+       las pistas y el intento de adivinar van cifrados. El anfitrión reparte
+       una clave de sala a cada jugador (tema "rk"), así el servidor solo ve
+       nombres y bloques cifrados. También avisa de desconexiones y mantiene
+       la pantalla encendida mientras haya sala.
      ========================================================= */
   const ARTIFACT_URL = 'https://claude.ai/artifact/DiyBH86ezmKyiXWsB1nffh';
   const STANDALONE = typeof window !== 'undefined' && window.IMPOSTOR_STANDALONE === true;
@@ -2180,6 +2185,24 @@ if (false) module.exports = Rules;
     return JSON.parse(td.decode(pt));
   }
 
+  /* clave de sala (solo versión web): cifra el estado público para que el servidor de salas no lo pueda leer */
+  const E2E = STANDALONE;
+  const rand64 = n => b64(crypto.getRandomValues(new Uint8Array(n)));
+  const newRoomKey = () => ({ id: rand64(6), raw: rand64(32) });
+  const aesCache = new Map();
+  function aesKey(raw) { if (!aesCache.has(raw)) aesCache.set(raw, subtle.importKey('raw', unb64(raw), 'AES-GCM', false, ['encrypt', 'decrypt'])); return aesCache.get(raw); }
+  async function openFrom(pid, box, field) { try { return (await unseal(await keyFor(pid), box))[field]; } catch (e) { return null; } }
+  // mensajes de error de la sala, en claro para el jugador o el anfitrión
+  const JAM_ERR = {
+    full: 'La sala está llena: caben 30 jugadores.',
+    expired: 'Esta sala ha caducado. Pide al anfitrión que cree otra.',
+    not_found: 'No hay ninguna sala abierta con ese código. Revisa el código o pide al anfitrión que abra la sala.',
+    replaced: 'Has abierto esta sala en otra pestaña o en otro móvil.',
+    closed: 'El anfitrión ha cerrado la sala.'
+  };
+  const wakeWhileJam = () => { if (STANDALONE && (Store.jam || Store.join)) requestWake(); };
+  const releaseIfIdle = () => { if (!(Store.game && Store.game.phase !== 'end')) releaseWake(); };
+
   /* ---------- identidad de este móvil ---------- */
   async function ensureMe() {
     if (Store.me && Store.me.jwk && Store.me.pid) return Store.me;
@@ -2214,6 +2237,7 @@ if (false) module.exports = Rules;
     if (!me.name) me.name = (Store.players[0] || 'Anfitrión');
     const kp = await newKeyPair();
     Store.jam = { code: newCode(), seq: 0, hostPlays: true, members: {}, order: [], kicked: [], game: null, hk: kp, extra: freshExtra() };
+    if (STANDALONE) { Store.jam.tok = hostToken(); Store.jam.rk = newRoomKey(); }
     save();
     await hostConnect();
     for (let k = 0; k < 3 && !J.room && J.taken; k++) { Store.jam.code = newCode(); save(); await hostConnect(); }
@@ -2225,9 +2249,15 @@ if (false) module.exports = Rules;
     try {
       J.taken = false;
       if (STANDALONE && !jam().tok) jam().tok = hostToken();
+      if (E2E && !jam().rk) jam().rk = newRoomKey();
       J.room = await Caps.room.join(roomName(jam().code), STANDALONE ? { hub: true, token: jam().tok } : { hub: true });
       J.room.presence({ host: jam().code, hp: jam().hk.pub }).catch(() => {});
-      J.room.onPeers(onHostPeers, e => { J.err = e.message || e.code; J.room = null; renderSoon(); });
+      J.room.onPeers(onHostPeers, e => {
+        J.err = e.code === 'expired' ? 'La sala había caducado. Pulsa Reconectar para abrirla otra vez con el mismo código.' : (e.code === 'replaced' ? JAM_ERR.replaced : e.message || e.code);
+        J.room = null; renderSoon();
+      });
+      if (J.room.onStatus) J.room.onStatus(st => { J.status = st; renderSoon(); });
+      wakeWhileJam();
       clearInterval(J.timer);
       J.timer = setInterval(hostTick, 250);
     } catch (e) {
@@ -2237,20 +2267,23 @@ if (false) module.exports = Rules;
     J.connecting = false; renderSoon();
   }
   function hostLeave() {
-    try { if (J.room) J.room.leave(); } catch (e) {}
-    clearInterval(J.timer); J.room = null; J.keys = {}; J.pres = {}; J.online = new Set();
-    Store.jam = null; save();
+    const room = J.room;
+    // en la web, el servidor borra la sala al recibir "bye" y avisa a los jugadores
+    try { if (room) { if (STANDALONE) room.emit('bye', { c: jam().code }).catch(() => {}); setTimeout(() => room.leave(), STANDALONE ? 300 : 0); } } catch (e) {}
+    clearInterval(J.timer); J.room = null; J.keys = {}; J.pres = {}; J.online = new Set(); J.status = null;
+    Store.jam = null; save(); releaseIfIdle();
   }
   let lastHostEmit = 0, lastCardSend = 0;
   function hostTick() {
     const now = Date.now();
     jamTimerLoop();
     if (now - lastHostEmit > 2000) emitState();
-    if (now - lastCardSend > 3000) sendCards();
+    if (now - lastCardSend > 3000) { sendCards(); sendKeys(); }
   }
 
   function onHostPeers(ch) {
     const j = jam(); if (!j) return;
+    const before = J.online;
     J.online = new Set(); J.pres = {};
     for (const p of ch.peers) {
       const pr = p.presence || {};
@@ -2262,9 +2295,32 @@ if (false) module.exports = Rules;
       if (!m) { j.members[pr.pid] = { n: name, pk: pr.pk }; j.order.push(pr.pid); }
       else { if (!j.game) m.n = name; if (m.pk !== pr.pk) { m.pk = pr.pk; delete J.keys[pr.pid]; } }
     }
-    if (ch.joined && ch.joined.length) { emitState(); lastCardSend = 0; if (!j.game && ch.joined.some(p => !p.sameTab)) Sound.play('join'); }
+    if (ch.joined && ch.joined.length) { emitState(); lastCardSend = 0; sendKeys(); if (!j.game && ch.joined.some(p => !p.sameTab)) Sound.play('join'); }
+    if (STANDALONE) {
+      if (!(ch.joined && ch.joined.length) && [...J.online].some(pid => !before.has(pid))) { emitState(); lastCardSend = 0; sendKeys(); }
+      noteConnections(before, J.online);
+    }
     processSignals();
     renderSoon();
+  }
+  /* aviso cuando un jugador se va o vuelve (solo versión web) */
+  function noteConnections(before, now) {
+    const j = jam(), left = J.left || (J.left = new Set());
+    const inPlay = pid => j.game ? j.game.players.some(p => p.pid === pid) : !!j.members[pid];
+    const nameOf = pid => (j.members[pid] || {}).n || 'Alguien';
+    const gone = [...before].filter(pid => !now.has(pid) && inPlay(pid));
+    const back = [...now].filter(pid => !before.has(pid) && left.has(pid));
+    gone.forEach(pid => left.add(pid)); back.forEach(pid => left.delete(pid));
+    if (gone.length) toast(`${gone.map(nameOf).join(', ')} ${gone.length === 1 ? 'se ha desconectado' : 'se han desconectado'}.`, 'warn');
+    else if (back.length) toast(`${back.map(nameOf).join(', ')} ${back.length === 1 ? 'ha vuelto' : 'han vuelto'}.`);
+  }
+  /* reparte la clave de sala a quien aún no la tiene (solo versión web) */
+  async function sendKeys() {
+    const j = jam(); if (!E2E || !j || !j.rk || !J.room) return;
+    for (const pid of J.online) {
+      if ((J.pres[pid] || {}).rk === j.rk.id) continue;
+      try { const box = await seal(await keyFor(pid), { id: j.rk.id, rk: j.rk.raw }); if (J.room) J.room.emit('rk', { to: pid, hp: j.hk.pub, iv: box.iv, ct: box.ct }).catch(() => {}); } catch (e) {}
+    }
   }
   async function keyFor(pid) {
     const m = jam().members[pid]; if (!m) return null;
@@ -2326,7 +2382,10 @@ if (false) module.exports = Rules;
     while (txt.length > LIM && s.clues && s.clues.length) { s.clues.shift(); txt = JSON.stringify(s); }
     if (txt.length > LIM) { s.pl.forEach(p => { p.n = p.n.slice(0, 10); }); txt = JSON.stringify(s); }
     lastHostEmit = Date.now();
-    J.room.emit('st', s).catch(() => {});
+    if (E2E) {
+      const room = J.room, wrap = { c: j.code, hp: j.hk.pub, k: j.rk.id };
+      aesKey(j.rk.raw).then(k => seal(k, s)).then(enc => room.emit('st', Object.assign(wrap, { enc }))).catch(() => {});
+    } else J.room.emit('st', s).catch(() => {});
     save();
   }
   async function sendCards() {
@@ -2357,7 +2416,10 @@ if (false) module.exports = Rules;
       const i = idxOf(pid); if (i < 0) continue;
       if (pr.ack === g.id && !e.acks.includes(pid)) e.acks.push(pid);
       if (g.phase === 'reveal' && pr.ready === g.id && !e.ready.includes(i)) { e.ready.push(i); if (!e.acks.includes(pid)) e.acks.push(pid); }
-      if (g.phase === 'clues' && g.order[g.turn] === i && pr.clue && pr.clue.k === turnKey(g)) { hostClue(String(pr.clue.text || '').slice(0, 60), false); }
+      if (g.phase === 'clues' && g.order[g.turn] === i && pr.clue && pr.clue.k === turnKey(g)) {
+        const k = pr.clue.k, text = pr.clue.b ? await openFrom(pid, pr.clue.b, 'text') : pr.clue.text;
+        if (text != null && jg() === g && g.phase === 'clues' && g.order[g.turn] === i && k === turnKey(g)) hostClue(String(text || '').slice(0, 60), false);
+      }
       if (g.phase === 'vote' && g.players[i].alive && e.votes[i] == null && pr.vote && pr.vote.k === e.voteKey && pr.vote.b) {
         try {
           const v = await unseal(await keyFor(pid), pr.vote.b);
@@ -2367,8 +2429,9 @@ if (false) module.exports = Rules;
           }
         } catch (x) {}
       }
-      if (g.phase === 'voteResult' && g.guessState === 'pending' && g.lastVote.eliminated === i && pr.guess && pr.guess.k === e.voteKey && pr.guess.t) {
-        e.guessText = String(pr.guess.t).slice(0, 40); hostGuess(R.guessMatches(g, e.guessText));
+      if (g.phase === 'voteResult' && g.guessState === 'pending' && g.lastVote.eliminated === i && pr.guess && pr.guess.k === e.voteKey && (pr.guess.t || pr.guess.b)) {
+        const txt = pr.guess.b ? await openFrom(pid, pr.guess.b, 't') : pr.guess.t;
+        if (txt && jg() === g && g.phase === 'voteResult' && g.guessState === 'pending') { e.guessText = String(txt).slice(0, 40); hostGuess(R.guessMatches(g, e.guessText)); }
       }
     }
     if (g.phase === 'vote' && allVoted()) closeVote();
@@ -2518,21 +2581,44 @@ if (false) module.exports = Rules;
     try {
       const me = await ensureMe();
       Store.join = { code }; save();
+      P.rk = null; P.pendingSt = null; P.status = null;
       P.room = await Caps.room.join(roomName(code));
       P.room.on('st', m => onPlayerState(m));
       P.room.on('card', m => onPlayerCard(m));
+      P.room.on('rk', m => onPlayerKey(m));
+      P.room.on('bye', m => { if (m.data && Store.join && m.data.c === Store.join.code) { playerLeave(); UI.stack = []; go('home', {}, true); toast(JAM_ERR.closed, 'warn'); } });
       await P.room.presence({ g: code, pid: me.pid, n: me.name, pk: me.pub });
-      P.room.onPeers(() => {}, e => { P.err = 'Se perdió la conexión con la sala.'; P.room = null; renderSoon(); });
-    } catch (e) { P.room = null; P.err = 'No se pudo entrar en la sala. Comprueba el código y que tienes acceso al enlace.'; }
+      P.room.onPeers(() => {}, e => { P.err = (e && JAM_ERR[e.code]) || 'Se perdió la conexión con la sala.'; P.room = null; renderSoon(); });
+      if (P.room.onStatus) P.room.onStatus(st => { P.status = st; renderSoon(); });
+      wakeWhileJam();
+    } catch (e) { P.room = null; P.err = (e && JAM_ERR[e.code]) || 'No se pudo entrar en la sala. Comprueba el código y que tienes acceso al enlace.'; }
     P.connecting = false; renderSoon();
   }
   function playerLeave() {
     try { if (P.room) P.room.leave(); } catch (e) {}
-    P.room = null; P.st = null; P.lastSt = ''; Store.join = null; Store.myCard = null; save();
+    P.room = null; P.st = null; P.lastSt = ''; P.rk = null; P.pendingSt = null; P.status = null; Store.join = null; Store.myCard = null; save(); releaseIfIdle();
     try { if (location.hash) history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
   }
   function onPlayerState(m) {
-    const s = m.data;
+    const d = m.data;
+    if (!d || typeof d !== 'object' || !Store.join || d.c !== Store.join.code) return;
+    if (!d.enc) { if (!E2E) applyState(d); return; }   // en la web solo vale el estado cifrado con la clave de sala
+    if (d.hp && d.hp !== P.hostPub) { P.hostPub = d.hp; P.hostKey = null; }
+    if (!P.rk || P.rk.id !== d.k) { P.pendingSt = m; return; }   // llegará la clave y se abrirá
+    unseal(P.rk.key, d.enc).then(applyState).catch(() => { P.pendingSt = m; });
+  }
+  /* clave de sala que manda el anfitrión, cifrada solo para este móvil */
+  async function onPlayerKey(m) {
+    const d = m.data; if (!d || !Store.me || d.to !== Store.me.pid || !d.hp) return;
+    if (d.hp !== P.hostPub) { P.hostPub = d.hp; P.hostKey = null; }
+    try {
+      const k = await unseal(await hostKeyP(), d);
+      if (!P.rk || P.rk.id !== k.id) P.rk = { id: k.id, key: await aesKey(k.rk) };
+      if (P.room) P.room.presence({ rk: k.id }).catch(() => {});
+      if (P.pendingSt) { const q = P.pendingSt; P.pendingSt = null; onPlayerState(q); }
+    } catch (e) { P.hostKey = null; }
+  }
+  function applyState(s) {
     if (!s || typeof s !== 'object' || !Store.join || s.c !== Store.join.code) return;
     if (P.st && P.st.gid === s.gid && s.seq < P.st.seq && Date.now() - P.stAt < 8000) return;
     if (!P.st || P.st.gid !== s.gid) { UI.cardSeen = false; UI.cardOpen = false; UI.myCard = false; }
@@ -2760,6 +2846,26 @@ if (false) module.exports = Rules;
     return head + `<main class="pad jam">${s.ph !== 'lobby' ? jamBar(code, myBtn) : ''}${myCard}${body}${leave}</main>`;
   };
 
+  /* ---------- avisos de conexión (solo versión web) ---------- */
+  const notice = t => `<p class="note warn conn-note" role="status">${t}</p>`;
+  function hostNotice() {
+    const j = jam(); if (!STANDALONE || !j || !J.room) return '';
+    if (J.status && !J.status.connected) return notice('Sin conexión con el servidor de salas. Reconectando… La partida está guardada en este móvil.');
+    const g = j.game; if (!g || g.phase === 'end') return '';
+    const off = g.players.filter(p => p.pid !== Store.me.pid && !J.online.has(p.pid)).map(p => esc(p.name));
+    return off.length ? notice(`${off.length === 1 ? 'Se ha desconectado' : 'Se han desconectado'}: ${off.join(', ')}. Cuando ${off.length === 1 ? 'vuelva, seguirá' : 'vuelvan, seguirán'} donde ${off.length === 1 ? 'estaba' : 'estaban'}.`) : '';
+  }
+  function playerNotice() {
+    if (!STANDALONE || !P.room || !P.status) return '';
+    if (!P.status.connected) return notice('Sin conexión. Reconectando…');
+    if (!P.status.hub) return notice('El anfitrión se ha desconectado. Cuando vuelva, la partida seguirá donde estaba.');
+    return '';
+  }
+  // el aviso va al principio del contenido de cada pantalla de sala
+  const withNotice = (view, fn) => () => { const html = view(), n = fn(); return n ? html.replace(/(<main class="pad[^"]*">)/, `$1${n}`) : html; };
+  V.jamHost = withNotice(V.jamHost, hostNotice);
+  V.jamPlayer = withNotice(V.jamPlayer, playerNotice);
+
   /* ---------- QR ---------- */
   function drawQr() {
     const el = document.getElementById('qr'), j = jam();
@@ -2825,12 +2931,12 @@ if (false) module.exports = Rules;
     'jp-leave-ask': () => { UI.confirm = 'jp-leave'; render(); },
     'jp-leave': () => { playerLeave(); UI.stack = []; go('home', {}, true); },
     'jp-ready': () => { const s = P.st; if (!s || !P.room) return; UI.cardOpen = false; P.room.presence({ ready: s.gid, ack: s.gid }).catch(() => {}); s.ready = (s.ready || []).concat(myPlayerIdx()); render(); },
-    'jp-clue': () => {
+    'jp-clue': async () => {
       const s = P.st; if (!s || s.ph !== 'clues' || !P.room) return;
-      const i = document.getElementById('p-clue');
-      UI.sentClue = `${s.gid}${s.rd}.${s.crd}.${s.t}`;
-      P.room.presence({ clue: { k: `${s.gid}.${s.rd}.${s.crd}.${s.t}`, text: i ? i.value.trim().slice(0, 60) : '' } }).catch(() => toast('No se pudo enviar. Inténtalo otra vez.', 'warn'));
-      render();
+      const i = document.getElementById('p-clue'), text = i ? i.value.trim().slice(0, 60) : '', k = `${s.gid}.${s.rd}.${s.crd}.${s.t}`;
+      UI.sentClue = `${s.gid}${s.rd}.${s.crd}.${s.t}`; render();
+      try { await P.room.presence({ clue: E2E ? { k, b: await seal(await hostKeyP(), { text }) } : { k, text } }); }
+      catch (e) { toast('No se pudo enviar. Inténtalo otra vez.', 'warn'); }
     },
     'jp-vote': async el => {
       const s = P.st; if (!s || s.ph !== 'vote' || !P.room) return;
@@ -2840,10 +2946,11 @@ if (false) module.exports = Rules;
         UI.sentVote = s.gid + s.vk; vibrate(40); render();
       } catch (e) { toast('No se pudo enviar el voto. Inténtalo otra vez.', 'warn'); }
     },
-    'jp-guess': () => {
+    'jp-guess': async () => {
       const s = P.st, i = document.getElementById('p-guess'); if (!s || !i || !i.value.trim()) return toast('Escribe un intento.', 'warn');
-      P.room.presence({ guess: { k: s.vk, t: i.value.trim().slice(0, 40) } }).catch(() => {});
+      const t = i.value.trim().slice(0, 40);
       UI.sentGuess = s.gid + s.vk; render();
+      try { await P.room.presence({ guess: E2E ? { k: s.vk, b: await seal(await hostKeyP(), { t }) } : { k: s.vk, t } }); } catch (e) {}
     }
   });
 
@@ -2862,6 +2969,10 @@ if (false) module.exports = Rules;
       if (Store.join && Store.join.code === code && Store.me && Store.me.name && Caps.room) { UI.stack = [{ view: 'home', args: {} }]; go('jamPlayer', {}, true); playerConnect(code); }
       else go('jamJoin', { code }, true);
       return;
+    }
+    if (STANDALONE && !code && Caps.room && UI.view === 'home') {
+      if (Store.jam) { UI.stack = [{ view: 'home', args: {} }]; go('jamHost', {}, true); hostConnect(); return; }
+      if (Store.join && Store.me && Store.me.name) { UI.stack = [{ view: 'home', args: {} }]; go('jamPlayer', {}, true); playerConnect(Store.join.code); return; }
     }
     if (UI.view === 'home' || UI.view === 'jamJoin') render();
   }
@@ -2912,6 +3023,7 @@ if (false) module.exports = Rules;
     const g = Store.game;
     if (document.hidden && g && g.cardOpen) { g.cardOpen = false; setCard(); }
     if (!document.hidden && g && g.phase !== 'end') requestWake();
+    if (!document.hidden) wakeWhileJam();
   });
 
   /* ---------- tema ---------- */
