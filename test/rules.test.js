@@ -173,6 +173,22 @@ t('pistas: repetidas y demasiado evidentes', () => {
   assert(!R.checkClue(g, 1, 'zzzz').obvious);
 });
 
+t('palabra parecida: nunca vacía aunque queden pocas palabras sin salir', () => {
+  const store = { custom: [{ id: 'c-x', name: 'X', words: ['uno', 'dos', 'tres'].map((w, i) => ({ id: 'w' + i, w, sim: '' })) }] };
+  const c2 = R.buildCatalog(WORDS, store);
+  for (const mode of ['parecida', 'infiltrado']) {
+    const c = { mode, players: ['A', 'B', 'C', 'D'], cats: ['c-x'], rules: R.rulesForMode(mode) };
+    const info = R.buildPool(c2, c, ['c-x::uno', 'c-x::dos']);
+    assert.deepStrictEqual(info.pool.map(p => p.w), ['tres'], mode + ': solo queda una sin salir');
+    for (let k = 0; k < 20; k++) {
+      const g = R.createGame(c, info.pool, undefined, info.alts);
+      assert(g.secret.imp && g.secret.imp !== g.secret.w, mode + ': el impostor recibe otra palabra, no «' + g.secret.imp + '»');
+      const i = g.players.findIndex(p => p.role === 'impostor');
+      assert(R.cardFor(g, i).word, mode + ': tarjeta del impostor sin palabra');
+    }
+  }
+});
+
 t('ajustes recomendados son válidos', () => {
   for (const id of Object.keys(R.PRESETS)) {
     const players = Array.from({ length: 10 }, (_, i) => 'J' + i);

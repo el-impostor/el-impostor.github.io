@@ -729,13 +729,15 @@ const Rules = (() => {
       pool = pool.filter(p => p.sim || perCat[p.catId] >= 2);
     }
     const total = pool.length;
+    // alts: de dónde sacar la palabra parecida, también entre las que ya han salido
+    const alts = pool;
     let recycled = false;
     if (r.avoidRepeats && usedKeys && usedKeys.length) {
       const used = new Set(usedKeys);
       const fresh = pool.filter(p => !used.has(p.key));
       if (fresh.length) pool = fresh; else if (total) recycled = true;
     }
-    return { pool, total, recycled, skippedImg };
+    return { pool, alts, total, recycled, skippedImg };
   }
 
   /* ---------- validación ---------- */
@@ -799,7 +801,8 @@ const Rules = (() => {
     return o ? { w: o.w, img: o.img || '', data: o.data || '' } : { w: '', img: '', data: '' };
   }
 
-  function createGame(cfg, pool, rng) {
+  // alts (opcional): palabras de las que puede salir la parecida; por defecto, el propio pool
+  function createGame(cfg, pool, rng, alts) {
     rng = rng || defaultRng;
     const r = JSON.parse(JSON.stringify(cfg.rules));
     const names = cfg.players.map((p, i) => String(p || '').trim() || `Jugador ${i + 1}`);
@@ -807,7 +810,7 @@ const Rules = (() => {
     const roles = assignRoles(names.length, r.impostors, rng);
     const secret = Object.assign({}, pick(pool, rng));
     if (r.impostorInfo === 'similar' || r.impostorInfo === 'unaware') {
-      const sm = similarFor(secret, pool, rng); secret.imp = sm.w; secret.impImg = sm.img; secret.impData = sm.data;
+      const sm = similarFor(secret, alts || pool, rng); secret.imp = sm.w; secret.impImg = sm.img; secret.impData = sm.data;
     }
     const players = names.map((name, i) => ({ name, role: roles[i], alive: true, cluesLeft: r.maxClues || 0, penalties: 0, votedOut: 0 }));
     return {
@@ -1727,7 +1730,7 @@ if (false) module.exports = Rules;
       const keys = new Set(info.pool.map(p => p.key));
       Store.used = Store.used.filter(k => !keys.has(k));
     }
-    const g = R.createGame(s, info.pool);
+    const g = R.createGame(s, info.pool, undefined, info.alts);
     g.revealStep = 'pass'; g.cardOpen = false; g.cardSeen = false;
     Store.game = g;
     requestWake();
@@ -2369,7 +2372,7 @@ if (false) module.exports = Rules;
     const info = R.buildPool(catalog(), cfg, Store.used), v = R.validate(cfg, info);
     if (!v.ok) return toast(v.errors[0], 'warn');
     if (info.recycled) { const keys = new Set(info.pool.map(p => p.key)); Store.used = Store.used.filter(k => !keys.has(k)); }
-    const g = R.createGame(cfg, info.pool);
+    const g = R.createGame(cfg, info.pool, undefined, info.alts);
     g.players.forEach((p, i) => { p.pid = mem[i].pid; });
     g.phase = 'reveal';
     j.extra = freshExtra();

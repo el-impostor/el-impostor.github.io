@@ -261,7 +261,7 @@
     const info = R.buildPool(catalog(), cfg, Store.used), v = R.validate(cfg, info);
     if (!v.ok) return toast(v.errors[0], 'warn');
     if (info.recycled) { const keys = new Set(info.pool.map(p => p.key)); Store.used = Store.used.filter(k => !keys.has(k)); }
-    const g = R.createGame(cfg, info.pool);
+    const g = R.createGame(cfg, info.pool, undefined, info.alts);
     g.players.forEach((p, i) => { p.pid = mem[i].pid; });
     g.phase = 'reveal';
     j.extra = freshExtra();

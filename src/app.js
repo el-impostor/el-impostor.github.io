@@ -779,7 +779,7 @@
       const keys = new Set(info.pool.map(p => p.key));
       Store.used = Store.used.filter(k => !keys.has(k));
     }
-    const g = R.createGame(s, info.pool);
+    const g = R.createGame(s, info.pool, undefined, info.alts);
     g.revealStep = 'pass'; g.cardOpen = false; g.cardSeen = false;
     Store.game = g;
     requestWake();

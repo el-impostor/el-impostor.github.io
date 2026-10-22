@@ -202,13 +202,15 @@ const Rules = (() => {
       pool = pool.filter(p => p.sim || perCat[p.catId] >= 2);
     }
     const total = pool.length;
+    // alts: de dónde sacar la palabra parecida, también entre las que ya han salido
+    const alts = pool;
     let recycled = false;
     if (r.avoidRepeats && usedKeys && usedKeys.length) {
       const used = new Set(usedKeys);
       const fresh = pool.filter(p => !used.has(p.key));
       if (fresh.length) pool = fresh; else if (total) recycled = true;
     }
-    return { pool, total, recycled, skippedImg };
+    return { pool, alts, total, recycled, skippedImg };
   }
 
   /* ---------- validación ---------- */
@@ -272,7 +274,8 @@ const Rules = (() => {
     return o ? { w: o.w, img: o.img || '', data: o.data || '' } : { w: '', img: '', data: '' };
   }
 
-  function createGame(cfg, pool, rng) {
+  // alts (opcional): palabras de las que puede salir la parecida; por defecto, el propio pool
+  function createGame(cfg, pool, rng, alts) {
     rng = rng || defaultRng;
     const r = JSON.parse(JSON.stringify(cfg.rules));
     const names = cfg.players.map((p, i) => String(p || '').trim() || `Jugador ${i + 1}`);
@@ -280,7 +283,7 @@ const Rules = (() => {
     const roles = assignRoles(names.length, r.impostors, rng);
     const secret = Object.assign({}, pick(pool, rng));
     if (r.impostorInfo === 'similar' || r.impostorInfo === 'unaware') {
-      const sm = similarFor(secret, pool, rng); secret.imp = sm.w; secret.impImg = sm.img; secret.impData = sm.data;
+      const sm = similarFor(secret, alts || pool, rng); secret.imp = sm.w; secret.impImg = sm.img; secret.impData = sm.data;
     }
     const players = names.map((name, i) => ({ name, role: roles[i], alive: true, cluesLeft: r.maxClues || 0, penalties: 0, votedOut: 0 }));
     return {
