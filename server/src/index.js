@@ -2,7 +2,8 @@
    SERVIDOR DE SALAS (Cloudflare Workers + Durable Objects)
    Cada sala es un Durable Object que reenvía mensajes:
    - el anfitrión ("hub") emite temas (estado, tarjetas, clave de sala) a todos;
-   - cada jugador ("client") publica su presencia, que solo recibe el anfitrión.
+   - cada jugador ("client") publica su presencia, que solo recibe el anfitrión,
+     y puede mandarle mensajes solo a él ("send"), p. ej. sus aportaciones;
    No entiende el juego: tarjetas, votos, pistas y estado viajan cifrados
    de extremo a extremo y aquí solo se ven bloques opacos.
    Además: guarda el último estado para quien entra o se reconecta, avisa
@@ -65,6 +66,12 @@ export class Sala extends DurableObject {
     if (m.t === 'pres' && me.r === 'client' && m.presence && typeof m.presence === 'object') {
       (await this.presences())[me.id] = m.presence; await this.savePres();
       return this.toHub();
+    }
+    // un jugador manda algo solo al anfitrión (p. ej. sus aportaciones, cifradas); no se guarda
+    if (m.t === 'send' && me.r === 'client' && typeof m.topic === 'string') {
+      const out = JSON.stringify({ t: 'emit', topic: m.topic, data: m.data, from: me.id });
+      for (const h of this.hubs()) { try { h.send(out); } catch (e) {} }
+      return;
     }
     if (m.t === 'emit' && me.r === 'hub' && typeof m.topic === 'string') {
       const out = JSON.stringify({ t: 'emit', topic: m.topic, data: m.data });

@@ -3,7 +3,9 @@
    (server/, Cloudflare Workers + Durable Objects) por WebSocket.
    Funciona con datos móviles y en redes con cortafuegos porque es una
    conexión web normal. Expone la misma interfaz que usa jam.js:
-   join(name, {hub, token}) -> { emit, on, presence, onPeers, peers, onStatus, connected, leave }
+   join(name, {hub, token}) -> { emit, send, on, presence, onPeers, peers, onStatus, connected, leave }
+   - send(topic, data) (solo jugadores): mensaje solo para el anfitrión, que lo recibe
+     con on(topic) y peer = id del jugador. Sin conexión no se envía (devuelve false).
    - Se reconecta sola (esperas crecientes, latido cada 10 s) y al volver
      reenvía la presencia, así que un voto hecho sin conexión llega al volver.
    - onStatus(fn) avisa de { connected, hub }: si este móvil está conectado
@@ -46,6 +48,7 @@ const RelayRoom = (() => {
           (topics[topic] || []).forEach(fn => { try { fn({ topic, data, peer: 'hub', by: null, isMe: true, sameTab: true, kind: 'viewer', guest: false }); } catch (e) {} });
           send({ t: 'emit', topic, data });
         },
+        send: (topic, data) => !hub && send({ t: 'send', topic, data }),
         on: (topic, fn) => { (topics[topic] = topics[topic] || []).push(fn); return () => { topics[topic] = topics[topic].filter(f => f !== fn); }; },
         // sin conexión se guarda y se envía al reconectar
         presence: async patch => { for (const k in patch) { if (patch[k] === null) delete myPresence[k]; else myPresence[k] = patch[k]; } if (!hub) send({ t: 'pres', presence: myPresence }); },
@@ -77,7 +80,7 @@ const RelayRoom = (() => {
           fireStatus();
           if (!resolved) { resolved = true; resolve(api); }
         } else if (m.t === 'error') fatal(m.code);
-        else if (m.t === 'emit') (topics[m.topic] || []).forEach(fn => { try { fn({ topic: m.topic, data: m.data, peer: 'hub', by: null, isMe: false, sameTab: false, kind: 'viewer', guest: false }); } catch (e) {} });
+        else if (m.t === 'emit') (topics[m.topic] || []).forEach(fn => { try { fn({ topic: m.topic, data: m.data, peer: m.from || 'hub', by: null, isMe: false, sameTab: false, kind: 'viewer', guest: false }); } catch (e) {} });
         else if (m.t === 'peers' && hub && Array.isArray(m.peers)) {
           list = freeze(m.peers.map(p => freeze({ peer: p.peer, by: null, isMe: false, sameTab: false, kind: 'viewer', guest: false, presence: freeze(p.presence || {}), updatedAt: Date.now() })));
           const change = { peers: list, joined: list.filter(p => (m.joined || []).includes(p.peer)), left: m.left || [], updated: [] };

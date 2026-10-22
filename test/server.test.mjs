@@ -101,6 +101,20 @@ try {
     h.close(); a2.close();
   });
 
+  await t('un jugador manda un mensaje solo al anfitrión', async () => {
+    const r = room(), h = await hub(r), a = await client(r, 'jugadora06'), b = await client(r, 'jugadora07');
+    a.send({ t: 'send', topic: 'ap', data: { part: 0, of: 1, chunk: 'cifrado' } });
+    const m = await h.wait(x => x.t === 'emit' && x.topic === 'ap');
+    assert.strictEqual(m.from, 'jugadora06', 'el anfitrión sabe de quién es');
+    assert.strictEqual(m.data.chunk, 'cifrado');
+    await sleep(200);
+    assert(!b.got.some(x => x.topic === 'ap'), 'los demás jugadores no lo reciben');
+    h.send({ t: 'send', topic: 'ap', data: {} });   // el anfitrión no usa este canal
+    await sleep(200);
+    assert(!a.got.some(x => x.topic === 'ap'));
+    h.close(); a.close(); b.close();
+  });
+
   await t('el anfitrión cierra la sala: avisa y el código deja de valer', async () => {
     const r = room(), h = await hub(r), a = await client(r, 'jugadora04');
     h.send({ t: 'emit', topic: 'bye', data: { c: 'x' } });
