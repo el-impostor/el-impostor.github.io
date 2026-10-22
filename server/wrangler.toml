@@ -1,0 +1,17 @@
+# Servidor de salas de El Impostor. Desplegar: npx wrangler deploy
+name = "impostor-salas"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+SALA_TTL_SECONDS = "43200"   # la sala se borra tras 12 h sin actividad
+MAX_JUGADORES = "30"
+ORIGENES = ""                # p. ej. "https://usuario.github.io" para que solo tu web use el servidor
+
+[[durable_objects.bindings]]
+name = "SALAS"
+class_name = "Sala"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Sala"]

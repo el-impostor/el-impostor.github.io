@@ -11,3 +11,7 @@ node_modules/
 # sistema
 .DS_Store
 Thumbs.db
+
+# servidor de salas
+server/node_modules/
+server/.wrangler/

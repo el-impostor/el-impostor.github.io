@@ -1,0 +1,12 @@
+{
+  "name": "impostor-salas",
+  "private": true,
+  "description": "Servidor de salas de El Impostor (Cloudflare Workers + Durable Objects)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.151.3"
+  }
+}
