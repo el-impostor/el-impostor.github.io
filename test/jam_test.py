@@ -1,6 +1,6 @@
 """Prueba del modo sala con 1 anfitrión + 3 móviles (contextos de navegador separados).
 Se simula la capacidad `room` con un concentrador en Python que reenvía mensajes."""
-import sys, json, pathlib
+import sys, json, pathlib, re
 from playwright.sync_api import sync_playwright
 
 import os
@@ -267,13 +267,17 @@ with sync_playwright() as p:
         if shots:
             host.screenshot(path=str(SHOTS / 'jam_host_end.png'), full_page=True)
             players[0].screenshot(path=str(SHOTS / 'jam_player_end.png'), full_page=True)
-        # privacidad: la palabra no viaja en claro antes del final
+        # privacidad: la palabra no viaja en claro antes del final.
+        # Se busca como palabra entera: una palabra corta («up», «ex») puede aparecer por casualidad
+        # dentro de un texto en base64 (la clave pública del anfitrión) o de un nombre.
+        word_re = re.compile(r'(?<![\w+/=])' + re.escape(secret) + r'(?![\w+/=])', re.IGNORECASE)
         for m in emits_log:
             if m['topic'] == 'st' and m['data'].get('ph') != 'end' and m['data'].get('gid') == g['id']:
-                if secret.lower() in json.dumps(m['data'], ensure_ascii=False).lower():
+                if word_re.search(json.dumps(m['data'], ensure_ascii=False)):
                     check(False, f'{tag}: la palabra secreta aparece en el estado público ({m["data"]["ph"]})'); break
             if m['topic'] == 'card':
-                check(secret.lower() not in json.dumps(m['data'], ensure_ascii=False).lower(), f'{tag}: la tarjeta viaja cifrada')
+                check(set(m['data']) == {'to', 'gid', 'iv', 'ct'}, f'{tag}: la tarjeta solo lleva datos cifrados: {sorted(m["data"])}')
+                check(not word_re.search(json.dumps(m['data'], ensure_ascii=False)), f'{tag}: la tarjeta viaja cifrada')
         # votos cifrados en la presencia
         for room in members.values():
             for info in room.values():
