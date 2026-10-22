@@ -1,0 +1,106 @@
+{
+  // Terminal > Ejecutar tarea… (o Ctrl+Shift+P → «Tasks: Run Task»)
+  // Ctrl+Shift+B compila. En Windows se usa «python» en vez de «python3».
+  "version": "2.0.0",
+  "options": {
+    "cwd": "${workspaceFolder}",
+    "env": { "PYTHONUTF8": "1" }
+  },
+  "presentation": { "panel": "dedicated", "clear": true },
+  "tasks": [
+    {
+      "label": "Compilar",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["build.py"],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "panel": "shared", "reveal": "silent" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Compilar al guardar (watch)",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["-u", "watch.py"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "watch",
+        "pattern": { "regexp": "^(ERROR al compilar)$", "message": 1 },
+        "background": { "activesBegins": true, "beginsPattern": "^Vigilando", "endsPattern": "^\\[\\d\\d:\\d\\d:\\d\\d\\]" }
+      }
+    },
+    {
+      "label": "Pruebas de lógica",
+      "type": "process",
+      "command": "node",
+      "args": ["test/rules.test.js"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pruebas de interfaz",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["test/ui_test.py", "shots"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pruebas de sala (Claude)",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["test/jam_test.py", "shots"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Pruebas de sala (web)",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["test/jam_test.py", "shots"],
+      "options": { "env": { "PYTHONUTF8": "1", "MODE": "web" } },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Todas las pruebas",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Compilar", "Pruebas de lógica", "Pruebas de interfaz", "Pruebas de sala (Claude)", "Pruebas de sala (web)"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Servidor local",
+      "detail": "http://localhost:8000 (solo este ordenador)",
+      "type": "process",
+      "command": "python3",
+      "windows": { "command": "python" },
+      "args": ["-u", "-m", "http.server", "8000", "--bind", "127.0.0.1", "--directory", "dist/web"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "http",
+        "pattern": { "regexp": "^__nunca__$" },
+        "background": { "activesBegins": true, "beginsPattern": "^Serving HTTP", "endsPattern": "^Serving HTTP" }
+      }
+    },
+    {
+      "label": "Túnel HTTPS para el móvil",
+      "detail": "Cloudflare quick tunnel, sin cuenta: busca la URL https://….trycloudflare.com",
+      "type": "process",
+      "command": "cloudflared",
+      "args": ["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:8000"],
+      "dependsOn": ["Servidor local"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "cloudflared",
+        "pattern": { "regexp": "^__nunca__$" },
+        "background": { "activesBegins": true, "beginsPattern": "Requesting new quick Tunnel", "endsPattern": "trycloudflare\\.com" }
+      }
+    }
+  ]
+}

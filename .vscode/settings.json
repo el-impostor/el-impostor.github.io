@@ -1,0 +1,10 @@
+{
+  // No reformatear al guardar: los archivos existentes se quedan como están.
+  "editor.formatOnSave": false,
+  "editor.formatOnPaste": false,
+  "files.encoding": "utf8",
+  "files.eol": "\n",
+  // dist/ se genera con build.py: fuera de las búsquedas para no ver cada resultado dos veces.
+  "search.exclude": { "dist/**": true, "shots/**": true },
+  "terminal.integrated.env.windows": { "PYTHONUTF8": "1" }
+}

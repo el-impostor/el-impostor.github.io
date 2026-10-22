@@ -34,6 +34,10 @@ MODE=web python3 test/jam_test.py shots   # sala web (PeerJS simulado)
 ```
 Las pruebas de interfaz necesitan `pip install playwright && playwright install chromium`.
 
+- `python3 watch.py` recompila al cambiar algo en `src/` o `web/`.
+- En Windows se usa `python` (el `python3` de Microsoft Store es un acceso directo vacío). `build.py` lee y escribe siempre en UTF-8 con LF.
+- VS Code: `.vscode/tasks.json` tiene todas estas órdenes como tareas, además de «Servidor local» (`dist/web` en http://localhost:8000) y «Túnel HTTPS para el móvil» (`cloudflared tunnel --url`, sin cuenta). El túnel es necesario porque por `http://192.168.x.x` no hay `crypto.subtle` ni service worker, así que la sala no funciona.
+
 ## Decisiones tomadas
 - Todo funciona sin cuenta y sin conexión en modo un solo móvil. Los datos son locales del dispositivo; hay copia de seguridad en Ajustes.
 - **Votación en sala:** siempre secreta desde cada móvil. El anfitrión puede cerrarla antes de tiempo.
