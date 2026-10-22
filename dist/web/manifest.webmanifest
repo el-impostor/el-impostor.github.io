@@ -1,0 +1,17 @@
+{
+  "name": "El Impostor",
+  "short_name": "Impostor",
+  "description": "Juego de deducción para jugar en grupo: con un solo móvil o cada uno en el suyo.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#15121b",
+  "theme_color": "#15121b",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

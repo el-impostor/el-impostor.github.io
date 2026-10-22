@@ -1,0 +1,13 @@
+# capturas de las pruebas de interfaz (python3 test/*_test.py shots)
+shots/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# sistema
+.DS_Store
+Thumbs.db

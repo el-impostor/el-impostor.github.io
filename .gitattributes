@@ -1,0 +1,4 @@
+# guardar texto siempre con LF, también en Windows
+* text=auto eol=lf
+*.png binary
+*.zip binary
