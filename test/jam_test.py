@@ -194,7 +194,7 @@ with sync_playwright() as p:
         check(wait_until(lambda: 'Sin conexión' in note(pg), 10), f'{n} ve que no tiene conexión')
         check(wait_until(lambda: n in note(host), 10), f'el anfitrión ve que {n} se ha desconectado')
         restore(n)
-        check(wait_until(lambda: not note(pg) and n not in note(host), 25), f'{n} vuelve y desaparecen los avisos')
+        check(wait_until(lambda: not note(pg) and n not in note(host), 40), f'{n} vuelve y desaparecen los avisos')   # la reconexión espera cada vez más entre intentos
     def web_late_join():
         pg = new_page('Óscar', False); pg.goto(URL + '#sala-' + code); pg.wait_for_timeout(300)
         pg.fill('#jn-name', 'Óscar'); click(pg, '[data-a="jn-go"]')
