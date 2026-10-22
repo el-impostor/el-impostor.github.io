@@ -447,7 +447,7 @@ svg { width: 22px; height: 22px; flex: none; }
 window.IMPOSTOR_STANDALONE = true;
 // servidor de salas (server/); build.py pone aquí la dirección.
 // Para probar en local: ?sala-servidor=ws://127.0.0.1:8787 (solo se aceptan servidores locales)
-window.IMPOSTOR_RELAY = window.IMPOSTOR_RELAY || (q => /^ws:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q) ? q : '')(new URLSearchParams(location.search).get('sala-servidor') || '') || '';
+window.IMPOSTOR_RELAY = window.IMPOSTOR_RELAY || (q => /^ws:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q) ? q : '')(new URLSearchParams(location.search).get('sala-servidor') || '') || 'wss://impostor-salas.impostor-salas.workers.dev';
 /* =========================================================
    BANCO DE PALABRAS OFICIAL
    Formato de cada palabra: "palabra|parecida"

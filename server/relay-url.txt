@@ -1,0 +1,1 @@
+wss://impostor-salas.impostor-salas.workers.dev
