@@ -137,10 +137,10 @@ export default {
     const m = /^\/sala\/([a-z0-9-]{3,40})$/.exec(url.pathname);
     if (!m) return new Response('El Impostor · servidor de salas', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Hace falta WebSocket', { status: 426 });
-    // ORIGENES: lista separada por comas de webs que pueden usar el servidor (vacía = cualquiera)
+    // ORIGENES: lista separada por comas de webs que pueden usar el servidor (vacía o «*» = cualquiera; «*» lo usan las pruebas en local)
     const allowed = String(env.ORIGENES || '').split(',').map(s => s.trim()).filter(Boolean);
     const origin = req.headers.get('Origin') || '';
-    if (allowed.length && !allowed.includes(origin)) return new Response('Origen no permitido', { status: 403 });
+    if (allowed.length && !allowed.includes('*') && !allowed.includes(origin)) return new Response('Origen no permitido', { status: 403 });
     return env.SALAS.get(env.SALAS.idFromName(m[1])).fetch(req);
   }
 };

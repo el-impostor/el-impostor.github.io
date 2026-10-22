@@ -6,7 +6,7 @@ compatibility_date = "2026-10-01"
 [vars]
 SALA_TTL_SECONDS = "43200"   # la sala se borra tras 12 h sin actividad
 MAX_JUGADORES = "30"
-ORIGENES = ""                # p. ej. "https://usuario.github.io" para que solo tu web use el servidor
+ORIGENES = "https://guillesanmo2-droid.github.io"   # solo tu web puede usar el servidor (las pruebas en local ponen «*»)
 
 [[durable_objects.bindings]]
 name = "SALAS"
