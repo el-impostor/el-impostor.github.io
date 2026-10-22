@@ -189,6 +189,31 @@ t('palabra parecida: nunca vacía aunque queden pocas palabras sin salir', () =>
   }
 });
 
+t('aportaciones de los jugadores en la sala', () => {
+  const items = [
+    { id: 'a1', w: 'Paella', sim: 'Fideuá' }, { id: 'a2', w: 'paella ' }, { id: 'a3', w: '  ' },
+    { id: 'f1', w: 'Mi perro', data: 'data:image/jpeg;base64,AAA' }, { id: 'f2', w: 'Mi perro', data: 'data:image/jpeg;base64,BBB' },
+    { id: 'a4', w: 'Toro' }, { id: 'a5', w: 'Sol' }
+  ];
+  const sala = R.contribCategory(items);
+  assert.strictEqual(sala.id, R.CONTRIB_ID);
+  assert.deepStrictEqual(sala.words.map(w => w.w), ['Paella', 'Mi perro', 'Mi perro', 'Toro', 'Sol'], 'sin vacías ni repetidas');
+  assert.strictEqual(new Set(sala.words.map(w => w.key)).size, 5, 'dos fotos con el mismo nombre no chocan');
+  const all = cat.concat([sala]);
+  // valen aunque estén desactivadas las personalizadas o se pida «solo favoritas»
+  const only = cfg('clasico', { cats: [R.CONTRIB_ID], rules: { useCustom: false, favOnly: true, difficulty: 'easy' } });
+  const info = R.buildPool(all, only);
+  assert.strictEqual(info.total, 5);
+  assert(R.validate(only, info).ok);
+  const g = R.createGame(only, info.pool);
+  assert(['Paella', 'Mi perro', 'Toro', 'Sol'].includes(g.secret.w));
+  // mezcladas con las categorías elegidas
+  const mix = cfg('clasico', { cats: ['animales', R.CONTRIB_ID] });
+  assert.strictEqual(R.buildPool(all, mix).total, R.buildPool(cat, cfg('clasico', { cats: ['animales'] })).total + 5);
+  // sin aportaciones, «solo las de los jugadores» no deja empezar
+  assert(!R.validate(only, R.buildPool(cat.concat([R.contribCategory([])]), only)).ok);
+});
+
 t('ajustes recomendados son válidos', () => {
   for (const id of Object.keys(R.PRESETS)) {
     const players = Array.from({ length: 10 }, (_, i) => 'J' + i);

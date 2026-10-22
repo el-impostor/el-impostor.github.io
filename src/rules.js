@@ -188,6 +188,21 @@ const Rules = (() => {
     return a.charAt(0).toUpperCase() + a.slice(1).toLowerCase();
   }
 
+  /* categoría con lo que aportan los jugadores en una sala (palabras y fotos, de todos los autores juntos).
+     items: [{ id, w, sim, data }] · data = foto (data:image/…) */
+  const CONTRIB_ID = 'sala-aportadas';
+  function contribCategory(items) {
+    const seen = new Set(), words = [];
+    for (const a of items || []) {
+      const w = String(a.w || '').trim().slice(0, 40), data = typeof a.data === 'string' && a.data.startsWith('data:image/') ? a.data : '';
+      if (!w && !data) continue;
+      const key = data ? CONTRIB_ID + '::img:' + String(a.id || words.length) : keyOf(CONTRIB_ID, w);
+      if (seen.has(key)) continue; seen.add(key);
+      words.push({ key, w: w || 'Foto', sim: data ? '' : String(a.sim || '').trim().slice(0, 40), off: false, fav: false, user: false, img: '', data });
+    }
+    return { id: CONTRIB_ID, name: 'Aportadas en la sala', desc: 'Palabras y fotos de los jugadores.', ab: 'Sa', h: 45, d: 2, adult: false, custom: false, contrib: true, subs: [], words };
+  }
+
   /* palabras disponibles para una partida */
   function buildPool(catalog, cfg, usedKeys) {
     const r = cfg.rules;
@@ -199,8 +214,9 @@ const Rules = (() => {
       if (r.difficulty === 'hard' && c.d < 2) continue;
       for (const w of c.words) {
         if (w.off || w.subOff) continue;
-        if (!r.useCustom && (w.user || c.custom)) continue;
-        if (r.favOnly && !w.fav) continue;
+        // lo que aportan los jugadores vale siempre (no son «tus» palabras ni favoritas)
+        if (!c.contrib && !r.useCustom && (w.user || c.custom)) continue;
+        if (!c.contrib && r.favOnly && !w.fav) continue;
         // en modo sala solo valen imágenes subidas (las locales no llegan a otros móviles)
         if (cfg.jam && w.data && !w.img) { skippedImg++; continue; }
         pool.push({ key: w.key, w: w.w, sim: w.sim, catId: c.id, catName: c.name, sub: w.sub, img: w.img || '', data: w.data || '' });
@@ -425,7 +441,7 @@ const Rules = (() => {
   return {
     norm, keyOf, maxImpostors, impostorRange, statusAfterVote, shuffle, defaultRng, splitWord, abbr,
     CLUE_TYPES, MODES, PRESETS, applyPreset, modeById, defaultRules, rulesForMode,
-    buildCatalog, buildPool, validate,
+    buildCatalog, buildPool, validate, CONTRIB_ID, contribCategory,
     assignRoles, createGame, cardFor, turnOrder, questionTarget, clueCondition, checkClue,
     tally, aliveCounts, eliminate, checkWin, guessMatches, applyGuess
   };
