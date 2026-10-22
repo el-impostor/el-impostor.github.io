@@ -2137,7 +2137,7 @@ if (false) module.exports = Rules;
   (async () => {
     await new Promise(r => setTimeout(r, 0)); // dejar que la app termine de arrancar
     if (STANDALONE) {
-      Caps.room = (typeof PeerRoom !== 'undefined' && PeerRoom.available()) ? PeerRoom : null;
+      Caps.room = (typeof RelayRoom !== 'undefined' && RelayRoom.available()) ? RelayRoom : null;
       Caps.canEdit = true; Caps.ready = true; onCapsReady(); return;
     }
     const use = n => (window.claude && typeof window.claude.use === 'function') ? window.claude.use(n).catch(() => null) : Promise.resolve(null);
@@ -2187,6 +2187,8 @@ if (false) module.exports = Rules;
     Store.me = Object.assign({ name: '' }, Store.me || {}, { pid: 'p' + uid(), jwk: kp.jwk, pub: kp.pub });
     save(); return Store.me;
   }
+  // token secreto del anfitrión: el servidor de salas solo deja ser anfitrión a quien lo tiene
+  const hostToken = () => { const a = new Uint8Array(16); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); };
   const newCode = () => { const a = 'abcdefghjkmnpqrstuvwxyz23456789'; let s = ''; for (let i = 0; i < 5; i++) s += a[Math.floor(rng() * a.length)]; return s; };
   const roomName = code => 'imp-' + code;
   const joinUrl = code => (STANDALONE ? location.origin + location.pathname : ARTIFACT_URL) + '#sala-' + code;
@@ -2222,7 +2224,8 @@ if (false) module.exports = Rules;
     J.connecting = true; J.err = '';
     try {
       J.taken = false;
-      J.room = await Caps.room.join(roomName(jam().code), { hub: true });
+      if (STANDALONE && !jam().tok) jam().tok = hostToken();
+      J.room = await Caps.room.join(roomName(jam().code), STANDALONE ? { hub: true, token: jam().tok } : { hub: true });
       J.room.presence({ host: jam().code, hp: jam().hk.pub }).catch(() => {});
       J.room.onPeers(onHostPeers, e => { J.err = e.message || e.code; J.room = null; renderSoon(); });
       clearInterval(J.timer);

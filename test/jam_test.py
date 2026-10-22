@@ -1,5 +1,7 @@
 """Prueba del modo sala con 1 anfitrión + 3 móviles (contextos de navegador separados).
-Se simula la capacidad `room` con un concentrador en Python que reenvía mensajes."""
+- Normal: se simula la capacidad `room` de Claude con un concentrador en Python.
+- MODE=web: versión web contra el servidor de salas real (server/) con wrangler dev en local.
+  Playwright intercepta cada WebSocket: registra lo que viaja y puede cortar la conexión de un móvil."""
 import sys, json, pathlib, re
 from playwright.sync_api import sync_playwright
 
@@ -45,43 +47,54 @@ FAKE = r"""
 })();
 """
 
-FAKE_PEER = r"""
-(() => {
-  const PEERS = {};
-  const hub = m => window.__hubSend(JSON.stringify(m));
-  class Conn {
-    constructor(me, remote, cid) { this._me = me; this.peer = remote; this.cid = cid; this.open = false; this.h = {}; }
-    on(ev, fn) { (this.h[ev] = this.h[ev] || []).push(fn); }
-    _e(ev, a) { (this.h[ev] || []).forEach(f => f(a)); }
-    send(d) { hub({ t: 'data', cid: this.cid, to: this.peer, from: this._me.id, d: JSON.parse(JSON.stringify(d)) }); }
-    close() { if (!this.open) return; this.open = false; hub({ t: 'close', cid: this.cid, to: this.peer }); this._e('close'); }
-  }
-  class Peer {
-    constructor(id) { if (typeof id !== 'string') id = 'rnd' + Math.random().toString(36).slice(2, 10); this.id = id; this.h = {}; this.conns = {}; this.disconnected = false; this.destroyed = false; PEERS[id] = this; hub({ t: 'reg', id }); }
-    on(ev, fn) { (this.h[ev] = this.h[ev] || []).push(fn); }
-    _e(ev, a) { (this.h[ev] || []).forEach(f => f(a)); }
-    connect(remote) { const cid = 'c' + Math.random().toString(36).slice(2, 10); const c = new Conn(this, remote, cid); this.conns[cid] = c; hub({ t: 'connect', cid, from: this.id, to: remote }); return c; }
-    destroy() { this.destroyed = true; hub({ t: 'unreg', id: this.id }); }
-    reconnect() {}
-  }
-  window.Peer = Peer;
-  window.__hubRecv = m => {
-    const p = PEERS[m.to]; if (!p) return;
-    if (m.t === 'open-peer') p._e('open', p.id);
-    else if (m.t === 'error') p._e('error', { type: m.type });
-    else if (m.t === 'incoming') { const c = new Conn(p, m.from, m.cid); p.conns[m.cid] = c; p._e('connection', c); setTimeout(() => { c.open = true; c._e('open'); hub({ t: 'opened', cid: m.cid, to: m.from }); }, 0); }
-    else if (m.t === 'opened') { const c = p.conns[m.cid]; if (c) { c.open = true; c._e('open'); } }
-    else if (m.t === 'data') { const c = p.conns[m.cid]; if (c) c._e('data', m.d); }
-    else if (m.t === 'close') { const c = p.conns[m.cid]; if (c && c.open) { c.open = false; c._e('close'); } }
-  };
-})();
-"""
+# ---------- versión web: servidor de salas real en local ----------
+RELAY = None
+if WEB:
+    import subprocess, shutil, socket, urllib.request, time, atexit
+    NODE = shutil.which('node') or 'C:/Program Files/nodejs/node.exe'
+    _s = socket.socket(); _s.bind(('127.0.0.1', 0)); PORT = _s.getsockname()[1]; _s.close()
+    relay_proc = subprocess.Popen([NODE, 'test/relay-dev.mjs', str(PORT)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def stop_relay():
+        if os.name == 'nt': subprocess.run(['taskkill', '/pid', str(relay_proc.pid), '/T', '/F'], capture_output=True)
+        else: relay_proc.terminate()
+    atexit.register(stop_relay)
+    for _ in range(240):
+        try: urllib.request.urlopen(f'http://127.0.0.1:{PORT}/', timeout=1); break
+        except Exception: time.sleep(0.5)
+    else:
+        print('No arranca el servidor de salas (wrangler dev)'); sys.exit(1)
+    RELAY = f'ws://127.0.0.1:{PORT}'
+SOCKS, BLOCK = {}, set()   # conexión actual de cada móvil · móviles «sin cobertura»
+def route_ws(name):
+    def handler(ws):
+        if name in BLOCK: ws.close(); return
+        server = ws.connect_to_server(); SOCKS[name] = (ws, server)
+        def up(msg):
+            if name in BLOCK: return
+            log_up(name, msg); server.send(msg)
+        def down(msg):
+            if name not in BLOCK: ws.send(msg)
+        ws.on_message(up); server.on_message(down)
+    return handler
+def log_up(name, msg):
+    if not isinstance(msg, str) or msg == 'ping': return
+    try: m = json.loads(msg)
+    except Exception: return
+    if m.get('t') == 'emit': emits_log.append({'topic': m['topic'], 'data': m['data']})
+    if m.get('t') in ('pres', 'hello') and isinstance(m.get('presence'), dict): members.setdefault('web', {})[name] = {'presence': m['presence']}
+def cut(name):
+    """El móvil pierde la cobertura: se corta su conexión y no puede reconectar hasta restore()."""
+    BLOCK.add(name); sk = SOCKS.pop(name, None)
+    for r in (sk or ()):
+        try: r.close()
+        except Exception: pass
+def restore(name): BLOCK.discard(name)
+
 # en el anfitrión, descifrar tarda un poco (como en un móvil lento): así llegan presencias mientras descifra
 SLOW_DECRYPT = r"""
 (() => { const d = SubtleCrypto.prototype.decrypt;
   SubtleCrypto.prototype.decrypt = function (...a) { return new Promise(r => setTimeout(r, 150)).then(() => d.apply(this, a)); }; })();
 """
-registry = {}
 queue, members, emits_log = [], {}, []   # members[room] = {peer: {'page':page,'presence':{}}}
 def pump(rounds=6, wait=60):
     any_page = next(iter(pages.values()))
@@ -89,8 +102,6 @@ def pump(rounds=6, wait=60):
         any_page.wait_for_timeout(wait)
         while queue:
             page, m = queue.pop(0)
-            if WEB:
-                route_web(page, m); continue
             room = members.setdefault(m['room'], {})
             if m['t'] == 'join':
                 room[m['from']] = {'page': page, 'presence': {}}; broadcast(m['room'], [m['from']])
@@ -103,25 +114,6 @@ def pump(rounds=6, wait=60):
                 for peer, info in list(room.items()):
                     try: info['page'].evaluate('m => window.__hubRecv(m)', m)
                     except Exception: pass
-def deliver(page, msg):
-    try: page.evaluate('m => window.__hubRecv(m)', msg)
-    except Exception: pass
-def route_web(page, m):
-    t = m['t']
-    if t == 'reg':
-        if m['id'] in registry and registry[m['id']] is not page: deliver(page, {'t': 'error', 'to': m['id'], 'type': 'unavailable-id'})
-        else: registry[m['id']] = page; deliver(page, {'t': 'open-peer', 'to': m['id']})
-    elif t == 'unreg':
-        if registry.get(m['id']) is page: registry.pop(m['id'], None)
-    elif t == 'connect':
-        if m['to'] in registry: deliver(registry[m['to']], {'t': 'incoming', 'to': m['to'], 'from': m['from'], 'cid': m['cid']})
-        else: deliver(page, {'t': 'error', 'to': m['from'], 'type': 'peer-unavailable'})
-    elif t in ('data', 'close', 'opened'):
-        if t == 'data' and isinstance(m.get('d'), dict):
-            d = m['d']
-            if d.get('t') == 'emit': emits_log.append({'topic': d['topic'], 'data': d['data']})
-            if d.get('t') == 'pres': members.setdefault('web', {})[m['from']] = {'presence': d['presence']}
-        if m['to'] in registry: deliver(registry[m['to']], m)
 def broadcast(room_name, joined):
     room = members[room_name]
     msg = {'t': 'peers', 'room': room_name, 'joined': joined, 'peers': [{'peer': p, 'presence': i['presence']} for p, i in room.items()]}
@@ -138,9 +130,10 @@ with sync_playwright() as p:
     pages = {}
     def new_page(name, can_edit):
         ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, has_touch=True)
-        ctx.add_init_script(f'window.__CAN_EDIT = {"true" if can_edit else "false"};' + (FAKE_PEER if WEB else FAKE) + (SLOW_DECRYPT if can_edit else ''))
+        ctx.add_init_script(f'window.__CAN_EDIT = {"true" if can_edit else "false"};' + (f'window.IMPOSTOR_RELAY = {json.dumps(RELAY)};' if WEB else FAKE) + (SLOW_DECRYPT if can_edit else ''))
         ctx.route('**/*', lambda r: r.abort() if r.request.url.startswith('http') else r.continue_())
-        ctx.expose_binding('__hubSend', lambda src, s: queue.append((src['page'], json.loads(s))))
+        if WEB: ctx.route_web_socket(re.compile(r'^ws://127\.0\.0\.1'), route_ws(name))
+        else: ctx.expose_binding('__hubSend', lambda src, s: queue.append((src['page'], json.loads(s))))
         pg = ctx.new_page()
         pg.on('pageerror', lambda e, n=name: errors.append(f'{n}: {e}'))
         pages[name] = pg

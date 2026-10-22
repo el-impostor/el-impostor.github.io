@@ -26,13 +26,15 @@ img{max-width:100%}
 </head>
 <body>
 <div id="app" aria-live="polite"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
 <script>
 window.IMPOSTOR_STANDALONE = true;
+// servidor de salas (server/); build.py pone aquí la dirección.
+// Para probar en local: ?sala-servidor=ws://127.0.0.1:8787 (solo se aceptan servidores locales)
+window.IMPOSTOR_RELAY = window.IMPOSTOR_RELAY || (q => /^ws:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(q) ? q : '')(new URLSearchParams(location.search).get('sala-servidor') || '') || '__RELAY_URL__';
 /*WORDS*/
 /*RULES*/
-/*PEER*/
+/*ROOM*/
 /*APP*/
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });

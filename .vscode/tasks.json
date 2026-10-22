@@ -68,9 +68,26 @@
       "problemMatcher": []
     },
     {
+      "label": "Pruebas del servidor de salas",
+      "detail": "server/ contra wrangler dev en local (no hace falta cuenta)",
+      "type": "process",
+      "command": "node",
+      "args": ["test/server.test.mjs"],
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Instalar dependencias del servidor",
+      "detail": "npm install en server/ (wrangler). Hace falta una vez antes de las pruebas web y del servidor",
+      "type": "shell",
+      "command": "npm install",
+      "options": { "cwd": "${workspaceFolder}/server" },
+      "problemMatcher": []
+    },
+    {
       "label": "Todas las pruebas",
       "dependsOrder": "sequence",
-      "dependsOn": ["Compilar", "Pruebas de lógica", "Pruebas de interfaz", "Pruebas de sala (Claude)", "Pruebas de sala (web)"],
+      "dependsOn": ["Compilar", "Pruebas de lógica", "Pruebas del servidor de salas", "Pruebas de interfaz", "Pruebas de sala (Claude)", "Pruebas de sala (web)"],
       "group": { "kind": "test", "isDefault": true },
       "problemMatcher": []
     },
@@ -101,6 +118,25 @@
         "pattern": { "regexp": "^__nunca__$" },
         "background": { "activesBegins": true, "beginsPattern": "Requesting new quick Tunnel", "endsPattern": "trycloudflare\\.com" }
       }
+    },
+    {
+      "label": "Servidor de salas local",
+      "detail": "ws://127.0.0.1:8787 · abre http://localhost:8000/?sala-servidor=ws://127.0.0.1:8787",
+      "type": "process",
+      "command": "node",
+      "args": ["test/relay-dev.mjs", "8787"],
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "salas",
+        "pattern": { "regexp": "^__nunca__$" },
+        "background": { "activesBegins": true, "beginsPattern": "^Servidor de salas", "endsPattern": "^Servidor de salas" }
+      }
+    },
+    {
+      "label": "Probar sala en local",
+      "detail": "Servidor local + servidor de salas: abre varias ventanas en http://localhost:8000/?sala-servidor=ws://127.0.0.1:8787",
+      "dependsOn": ["Servidor local", "Servidor de salas local"],
+      "problemMatcher": []
     }
   ]
 }

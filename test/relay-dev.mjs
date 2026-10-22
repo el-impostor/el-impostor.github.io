@@ -11,10 +11,10 @@ const WIN = process.platform === 'win32';
 
 export async function startRelay(vars = {}, port = 8790 + Math.floor(Math.random() * 100)) {
   const state = mkdtempSync(path.join(tmpdir(), 'impostor-salas-'));   // estado limpio en cada arranque
-  const args = ['wrangler', 'dev', '--ip', '127.0.0.1', '--port', String(port), '--persist-to', state, '--log-level', 'warn'];
+  const args = [path.join(SERVER, 'node_modules', 'wrangler', 'bin', 'wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', String(port), '--persist-to', state, '--log-level', 'warn'];
   for (const [k, v] of Object.entries(vars)) args.push('--var', `${k}:${v}`);
-  const proc = WIN ? spawn('cmd.exe', ['/c', 'npx', ...args], { cwd: SERVER, stdio: ['ignore', 'pipe', 'pipe'] })
-    : spawn('npx', args, { cwd: SERVER, stdio: ['ignore', 'pipe', 'pipe'] });
+  // wrangler con el mismo node que ejecuta esto (no depende de que npx esté en el PATH)
+  const proc = spawn(process.execPath, args, { cwd: SERVER, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = ''; proc.stdout.on('data', d => { log += d; }); proc.stderr.on('data', d => { log += d; });
   const url = `ws://127.0.0.1:${port}`;
   for (let i = 0; i < 120; i++) {

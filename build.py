@@ -1,4 +1,4 @@
-import pathlib, shutil, time, zipfile
+import os, pathlib, shutil, time, zipfile
 src = pathlib.Path('src')
 # UTF-8 y saltos LF siempre (en Windows Python usaría cp1252 y CRLF)
 rd = lambda p: pathlib.Path(p).read_text(encoding='utf-8')
@@ -14,13 +14,22 @@ t = rd(src/'template.html')
 t = t.replace('/*STYLES*/', styles).replace('/*WORDS*/', words).replace('/*RULES*/', rules).replace('/*APP*/', app)
 wr('dist/impostor.html', t)
 
-# 2) versión web independiente (PWA + salas sin cuenta)
+# 2) versión web independiente (PWA + salas sin cuenta por el servidor de server/)
+# Dirección del servidor de salas: variable RELAY_URL o server/relay-url.txt (wss://…)
+relay_file = pathlib.Path('server/relay-url.txt')
+relay = os.environ.get('RELAY_URL') or (relay_file.read_text(encoding='utf-8').strip() if relay_file.exists() else '')
 out = pathlib.Path('dist/web'); out.mkdir(parents=True, exist_ok=True)
+old = {f for f in out.rglob('*') if f.is_file()}
 w = rd('web/template.html')
-w = w.replace('/*STYLES*/', styles).replace('/*WORDS*/', words).replace('/*RULES*/', rules).replace('/*PEER*/', rd(src/'peer-room.js')).replace('/*APP*/', app)
+w = w.replace('/*STYLES*/', styles).replace('/*WORDS*/', words).replace('/*RULES*/', rules).replace('/*ROOM*/', rd(src/'relay-room.js')).replace('/*APP*/', app).replace('__RELAY_URL__', relay)
 wr(out/'index.html', w)
 wr(out/'sw.js', rd('web/sw.js').replace('__VERSION__', time.strftime('%Y%m%d%H%M%S')))
 for f in ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable.png']: shutil.copy(pathlib.Path('web')/f, out/f)
+shutil.copytree('web/vendor', out/'vendor', dirs_exist_ok=True)
+# quitar archivos que ya no se generan (sin borrar carpetas: en Windows OneDrive o el editor pueden tenerlas abiertas)
+made = {out/'index.html', out/'sw.js'} | {out/f.name for f in pathlib.Path('web').glob('*') if f.suffix in ('.png', '.webmanifest')} | {out/'vendor'/f.relative_to('web/vendor') for f in pathlib.Path('web/vendor').rglob('*') if f.is_file()}
+for f in old - made: f.unlink()
 with zipfile.ZipFile('dist/el-impostor-web.zip', 'w', zipfile.ZIP_DEFLATED) as z:
-    for f in sorted(out.iterdir()): z.write(f, f.name)
-print('artefacto', len(t), 'bytes · web', len(w), 'bytes')
+    for f in sorted(out.rglob('*')):
+        if f.is_file(): z.write(f, f.relative_to(out).as_posix())
+print('artefacto', len(t), 'bytes · web', len(w), 'bytes · servidor de salas:', relay or '(sin configurar)')
