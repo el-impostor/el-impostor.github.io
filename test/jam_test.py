@@ -2,7 +2,7 @@
 - Normal: se simula la capacidad `room` de Claude con un concentrador en Python.
 - MODE=web: versión web contra el servidor de salas real (server/) con wrangler dev en local.
   Playwright intercepta cada WebSocket: registra lo que viaja y puede cortar la conexión de un móvil."""
-import sys, json, pathlib, re
+import sys, json, pathlib, re, time
 from playwright.sync_api import sync_playwright
 
 import os
@@ -64,10 +64,11 @@ if WEB:
     else:
         print('No arranca el servidor de salas (wrangler dev)'); sys.exit(1)
     RELAY = f'ws://127.0.0.1:{PORT}'
-SOCKS, BLOCK = {}, set()   # conexión actual de cada móvil · móviles «sin cobertura»
+SOCKS, BLOCK, REFUSE = {}, set(), []   # conexión actual de cada móvil · móviles «sin cobertura» · conexiones por rechazar
 def route_ws(name):
     def handler(ws):
-        if name in BLOCK: ws.close(); return
+        # sin cobertura: se rechaza desde pump() (cerrar dentro del handler bloquea la API síncrona de Playwright)
+        if name in BLOCK: REFUSE.append(ws); return
         server = ws.connect_to_server(); SOCKS[name] = (ws, server)
         def up(msg):
             if name in BLOCK: return
@@ -90,6 +91,7 @@ def cut(name):
         except Exception: pass
 def restore(name): BLOCK.discard(name)
 
+WAKE_STUB = "window.__wake = 0; Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request: async () => { window.__wake++; return { release: async () => {}, addEventListener: () => {} }; } } });"
 # en el anfitrión, descifrar tarda un poco (como en un móvil lento): así llegan presencias mientras descifra
 SLOW_DECRYPT = r"""
 (() => { const d = SubtleCrypto.prototype.decrypt;
@@ -100,6 +102,9 @@ def pump(rounds=6, wait=60):
     any_page = next(iter(pages.values()))
     for _ in range(rounds):
         any_page.wait_for_timeout(wait)
+        while REFUSE:
+            try: REFUSE.pop().close()
+            except Exception: pass
         while queue:
             page, m = queue.pop(0)
             room = members.setdefault(m['room'], {})
@@ -124,13 +129,24 @@ def broadcast(room_name, joined):
 def store(pg): return pg.evaluate("JSON.parse(localStorage.getItem('impostor.v1'))")
 def view(pg): return pg.evaluate("document.getElementById('app').dataset.view")
 def click(pg, sel): pg.locator(sel).first.click()
+def wait_until(cond, secs=15):
+    end = time.time() + secs
+    while time.time() < end:
+        try:
+            if cond(): return True
+        except Exception: pass
+        pump(1, 100)
+    return False
+def note(pg):
+    """aviso de conexión que se ve en pantalla (versión web)"""
+    return pg.locator('.conn-note').inner_text() if pg.locator('.conn-note').count() else ''
 
 with sync_playwright() as p:
     b = p.chromium.launch()
     pages = {}
     def new_page(name, can_edit):
         ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, has_touch=True)
-        ctx.add_init_script(f'window.__CAN_EDIT = {"true" if can_edit else "false"};' + (f'window.IMPOSTOR_RELAY = {json.dumps(RELAY)};' if WEB else FAKE) + (SLOW_DECRYPT if can_edit else ''))
+        ctx.add_init_script(f'window.__CAN_EDIT = {"true" if can_edit else "false"};' + (f'window.IMPOSTOR_RELAY = {json.dumps(RELAY)};' + WAKE_STUB if WEB else FAKE) + (SLOW_DECRYPT if can_edit else ''))
         ctx.route('**/*', lambda r: r.abort() if r.request.url.startswith('http') else r.continue_())
         if WEB: ctx.route_web_socket(re.compile(r'^ws://127\.0\.0\.1'), route_ws(name))
         else: ctx.expose_binding('__hubSend', lambda src, s: queue.append((src['page'], json.loads(s))))
@@ -160,13 +176,53 @@ with sync_playwright() as p:
     check(len(lobby_names) == 4, 'el anfitrión ve 4 jugadores: %s' % lobby_names)
     players[0].screenshot(path=str(SHOTS / 'jam_player_lobby.png'))
     check('Lucía' in players[1].locator('main').inner_text(), 'los jugadores ven la lista de la sala')
+    if WEB: check(all(pg.evaluate('window.__wake') >= 1 for pg in [host] + players), 'con la sala abierta se pide mantener la pantalla encendida')
+
+    # ---------- situaciones reales (versión web) ----------
+    name_of = lambda pg: next(n for n, x in pages.items() if x is pg)
+    LATE = []
+    def web_host_drop():
+        cut('host')
+        check(wait_until(lambda: 'Sin conexión' in note(host), 10), 'el anfitrión ve que ha perdido la conexión')
+        check(wait_until(lambda: all('anfitrión se ha desconectado' in note(pg) for pg in players), 10), 'los jugadores ven que el anfitrión se ha ido')
+        pump(15, 100)   # un rato fuera
+        restore('host')
+        check(wait_until(lambda: not note(host) and all(not note(pg) for pg in players), 25), 'al volver el anfitrión desaparecen los avisos')
+    def web_player_drop():
+        pg = players[2]; n = name_of(pg); cut(n)
+        check(wait_until(lambda: 'Sin conexión' in note(pg), 10), f'{n} ve que no tiene conexión')
+        check(wait_until(lambda: n in note(host), 10), f'el anfitrión ve que {n} se ha desconectado')
+        restore(n)
+        check(wait_until(lambda: not note(pg) and n not in note(host), 25), f'{n} vuelve y desaparecen los avisos')
+    def web_late_join():
+        pg = new_page('Óscar', False); pg.goto(URL + '#sala-' + code); pg.wait_for_timeout(300)
+        pg.fill('#jn-name', 'Óscar'); click(pg, '[data-a="jn-go"]')
+        check(wait_until(lambda: 'partida en curso' in pg.locator('main').inner_text().lower(), 15), 'quien entra tarde ve que hay una partida en curso')
+        LATE.append(pg)
+    def web_host_reload():
+        before = store(host)['jam']['game']['phase']
+        host.reload()
+        check(wait_until(lambda: view(host) == 'jamHost' and host.locator('.dot-on').count() > 0, 20), 'al recargar, el anfitrión vuelve solo a su sala')
+        check(store(host)['jam']['game']['phase'] == before, 'la partida sigue donde estaba')
+        check(wait_until(lambda: all(not note(pg) for pg in players), 20), 'los jugadores siguen conectados tras recargar el anfitrión')
+    def web_lost_vote():
+        pg = next((x for x in players if x.locator('[data-a="jp-vote"]').count()), None)
+        if not pg: return
+        n = name_of(pg)
+        idx = [pl['pid'] for pl in store(host)['jam']['game']['players']].index(store(pg)['me']['pid'])
+        cut(n); wait_until(lambda: 'Sin conexión' in note(pg), 10)
+        pg.locator('[data-a="jp-vote"]').first.click(); pump(6)
+        check(str(idx) not in store(host)['jam']['extra']['votes'], 'sin conexión el voto aún no llega')
+        restore(n)
+        check(wait_until(lambda: str(idx) in store(host)['jam']['extra']['votes'] or store(host)['jam']['game']['phase'] != 'vote', 25), 'el voto hecho sin conexión llega al reconectar')
 
     STALE = []   # votos reales de la primera partida, para reenviarlos en la segunda
     def peer_of(pg):
         for room_name, room in members.items():
             for peer, info in room.items():
                 if info.get('page') is pg: return (room_name, []), info
-    def play_game(tag, shots=False, reload_mid=False, capture=False, replay=False):
+    def play_game(tag, shots=False, reload_mid=False, capture=False, replay=False, faults=None):
+        done = set()
         click(host, '[data-a="jh-deal"]'); pump(10)
         hs = store(host); g = hs['jam']['game']
         check(g is not None, f'{tag}: partida creada')
@@ -198,6 +254,16 @@ with sync_playwright() as p:
         while guard < 120:
             guard += 1
             g = store(host)['jam']['game']; ph = g['phase']
+            # cortes de conexión y entradas tardías, una vez cada uno
+            if faults == 'g1' and ph == 'clues':
+                for k, fn in (('host', web_host_drop), ('player', web_player_drop), ('late', web_late_join)):
+                    if k not in done: done.add(k); fn(); break
+                else: k = None
+                if k: continue
+            if faults == 'g2' and ph == 'debate' and 'reload' not in done:
+                done.add('reload'); web_host_reload(); continue
+            if faults == 'g2' and ph == 'vote' and 'vote' not in done:
+                done.add('vote'); web_lost_vote(); continue
             if ph == 'clues':
                 cur = g['players'][g['order'][g['turn']]]['pid']
                 if cur in byname:
@@ -287,7 +353,9 @@ with sync_playwright() as p:
                         if x: check('b' in x and 'text' not in x and 't' not in x, f'{tag}: {k} viaja cifrado')
         emits_log.clear()
 
-    play_game('clásico', shots=True, capture=True)
+    play_game('clásico', shots=True, capture=True, faults='g1' if WEB else None)
+    if WEB:
+        check(len(LATE) == 1, 'ha entrado alguien tarde'); players.extend(LATE)
     # segunda partida: otra configuración y un jugador recarga a mitad
     click(host, '[data-a="jh-new"]'); pump(4)
     click(host, '[data-a="nav"][data-to="setup"]')
@@ -297,7 +365,8 @@ with sync_playwright() as p:
     click(host, '[data-a="back"]')
     check(view(host) == 'jamHost', 'volver de reglas lleva a la sala')
     click(host, '[data-a="rule"][data-k="guess"][data-v=\'"win"\']') if host.locator('[data-a="rule"]').count() else None
-    play_game('pistas limitadas + recarga', reload_mid=True, replay=True)
+    play_game('pistas limitadas + recarga', reload_mid=True, replay=True, faults='g2' if WEB else None)
+    if WEB: check(len(store(host)['jam']['game']['players']) == 5, 'quien entró tarde juega la partida siguiente')
     b.close()
 
 print('Errores JS:', [e for e in errors][:5])
