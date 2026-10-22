@@ -1,6 +1,6 @@
 /* Service worker: la app funciona sin conexión (las salas necesitan internet).
    Todo lo que usa la app está en la carpeta; de fuera solo las fuentes de Google. */
-const VERSION = 'impostor-20261022180647';
+const VERSION = 'impostor-20261022181943';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable.png', 'vendor/qrcode.min.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {
