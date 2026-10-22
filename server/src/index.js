@@ -9,6 +9,9 @@
    Además: guarda el último estado para quien entra o se reconecta, avisa
    de si el anfitrión está conectado, limita los jugadores y borra la sala
    tras un tiempo sin actividad.
+   Estadísticas anónimas (Durable Object «Contador»): solo totales por día de
+   salas creadas, partidas repartidas y móviles que reciben papel. Ni nombres,
+   ni palabras, ni cookies. Se ven en /estadisticas.
    ========================================================= */
 import { DurableObject } from 'cloudflare:workers';
 
@@ -42,6 +45,9 @@ export class Sala extends DurableObject {
   clients(except) { return this.ctx.getWebSockets().filter(w => w !== except && this.info(w).r === 'client'); }
   async presences() { if (!this.pres) this.pres = (await this.ctx.storage.get('pres')) || {}; return this.pres; }
   async savePres() { await this.ctx.storage.put('pres', this.pres || {}); }
+  async count(add) {
+    try { await this.env.CONTADOR.get(this.env.CONTADOR.idFromName('global')).fetch('https://contador/sumar', { method: 'POST', body: JSON.stringify(add) }); } catch (e) {}
+  }
   fail(ws, code) { send(ws, { t: 'error', code }); try { ws.close(4000, code); } catch (e) {} }
   async touch() {
     const now = Date.now();
@@ -81,6 +87,13 @@ export class Sala extends DurableObject {
         for (const w of this.ctx.getWebSockets()) this.fail(w, 'closed');
         return;
       }
+      if (m.topic === 'card' && m.data && typeof m.data.gid === 'string' && typeof m.data.to === 'string') {
+        const g = (await this.ctx.storage.get('gid')) || { id: '', to: [] };
+        const add = {};
+        if (g.id !== m.data.gid) { g.id = m.data.gid; g.to = []; add.partidas = 1; }
+        if (!g.to.includes(m.data.to)) { g.to.push(m.data.to); add.jugadores = 1; }
+        if (add.partidas || add.jugadores) { await this.ctx.storage.put('gid', g); await this.count(add); }
+      }
       if (m.topic === 'st') {
         this.lastSt = m.data;
         if (Date.now() - this.stSaved > 10000) { this.stSaved = Date.now(); await this.ctx.storage.put('st', m.data); }
@@ -94,7 +107,7 @@ export class Sala extends DurableObject {
       // solo puede ser anfitrión quien tenga el token con el que se creó la sala
       if (typeof m.token !== 'string' || m.token.length < 16) return this.fail(ws, 'bad_token');
       if (tok && tok !== m.token) return this.fail(ws, 'id_taken');
-      if (!tok) await this.ctx.storage.put('tok', m.token);
+      if (!tok) { await this.ctx.storage.put('tok', m.token); await this.count({ salas: 1 }); }
       for (const h of this.hubs(ws)) this.fail(h, 'replaced');   // el anfitrión vuelve desde otra conexión
       ws.serializeAttachment({ r: 'hub' });
       send(ws, { t: 'welcome', you: 'hub' });
@@ -138,9 +151,39 @@ export class Sala extends DurableObject {
   }
 }
 
+const STATS = ['salas', 'partidas', 'jugadores'];
+export class Contador extends DurableObject {
+  async fetch(req) {
+    if (req.method === 'POST') {
+      let add = {}; try { add = await req.json(); } catch (e) {}
+      const k = 'd:' + new Date().toISOString().slice(0, 10), cur = (await this.ctx.storage.get(k)) || {};
+      for (const n of STATS) if (Number.isFinite(add[n]) && add[n] > 0 && add[n] <= 100) cur[n] = (cur[n] || 0) + add[n];
+      await this.ctx.storage.put(k, cur);
+      return new Response('ok');
+    }
+    const days = [...(await this.ctx.storage.list({ prefix: 'd:' }))].map(([k, v]) => Object.assign({ dia: k.slice(2) }, v)).sort((a, b) => a.dia < b.dia ? 1 : -1).slice(0, 400);
+    return Response.json(days);
+  }
+}
+const esc = x => String(x).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+async function statsPage(env, json) {
+  const days = await (await env.CONTADOR.get(env.CONTADOR.idFromName('global')).fetch('https://contador/')).json();
+  if (json) return Response.json(days);
+  const total = n => days.reduce((s, d) => s + (d[n] || 0), 0), cell = (d, n) => `<td>${d[n] || 0}</td>`;
+  const html = `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>El Impostor · estadísticas</title>
+<style>body{font-family:system-ui,sans-serif;margin:16px;background:#15121b;color:#eee}table{border-collapse:collapse;width:100%;max-width:520px}td,th{padding:6px 8px;border-bottom:1px solid #333;text-align:right}th:first-child,td:first-child{text-align:left}.k{font-size:2rem;font-weight:800}.g{display:flex;gap:24px;margin:16px 0}small{color:#aaa}</style>
+<h1>El Impostor · uso</h1>
+<div class="g"><div><div class="k">${total('salas')}</div>salas</div><div><div class="k">${total('partidas')}</div>partidas</div><div><div class="k">${total('jugadores')}</div>papeles repartidos</div></div>
+<table><tr><th>Día (UTC)</th><th>Salas</th><th>Partidas</th><th>Papeles</th></tr>${days.slice(0, 60).map(d => `<tr><td>${esc(d.dia)}</td>${cell(d, 'salas')}${cell(d, 'partidas')}${cell(d, 'jugadores')}</tr>`).join('')}</table>
+<p><small>Solo totales de la versión web con sala: sin nombres, palabras ni cookies. «Papeles» cuenta los móviles que reciben papel (sin el anfitrión). Las partidas de un solo móvil no pasan por el servidor y no se cuentan.</small></p>`;
+  return new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
+    if (url.pathname === '/estadisticas') return statsPage(env, url.searchParams.get('formato') === 'json');
     const m = /^\/sala\/([a-z0-9-]{3,40})$/.exec(url.pathname);
     if (!m) return new Response('El Impostor · servidor de salas', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('Hace falta WebSocket', { status: 426 });

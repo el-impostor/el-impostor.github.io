@@ -12,6 +12,14 @@ ORIGENES = "https://el-impostor.github.io"   # solo tu web puede usar el servido
 name = "SALAS"
 class_name = "Sala"
 
+[[durable_objects.bindings]]
+name = "CONTADOR"
+class_name = "Contador"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Sala"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Contador"]

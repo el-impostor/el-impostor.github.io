@@ -123,6 +123,20 @@ try {
     assert.strictEqual(late.got[0].code, 'not_found');
   });
 
+  await t('estadísticas anónimas: salas, partidas y papeles', async () => {
+    const stats = async () => (await (await fetch(relay.url.replace('ws', 'http') + '/estadisticas?formato=json')).json())
+      .reduce((s, d) => ({ salas: s.salas + (d.salas || 0), partidas: s.partidas + (d.partidas || 0), jugadores: s.jugadores + (d.jugadores || 0) }), { salas: 0, partidas: 0, jugadores: 0 });
+    const before = await stats();
+    const r = room(), h = await hub(r);
+    for (const [gid, to] of [['g1', 'p1'], ['g1', 'p2'], ['g1', 'p1'], ['g2', 'p1']]) h.send({ t: 'emit', topic: 'card', data: { to, gid, iv: 'x', ct: 'y' } });
+    h.close(); await sleep(500);
+    const h2 = await hub(r); h2.close(); await sleep(300);   // volver a la misma sala no cuenta como nueva
+    const after = await stats();
+    assert.deepStrictEqual({ salas: after.salas - before.salas, partidas: after.partidas - before.partidas, jugadores: after.jugadores - before.jugadores }, { salas: 1, partidas: 2, jugadores: 3 });
+    const page = await (await fetch(relay.url.replace('ws', 'http') + '/estadisticas')).text();
+    assert(page.includes('papeles repartidos') && page.includes('noindex'), 'página legible');
+  });
+
   await t('latido: ping → pong', async () => {
     const r = room(), h = await hub(r); h.send('ping'); await h.wait(m => m.t === 'pong'); h.close();
   });
