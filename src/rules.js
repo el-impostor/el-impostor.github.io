@@ -131,13 +131,24 @@ const Rules = (() => {
 
   /* ---------- ajustes recomendados ---------- */
   const PRESETS = {
-    rapida: { name: 'Partida rápida', desc: 'Una ronda de pistas y una sola votación.',
-      apply: (r) => Object.assign(r, { clueRounds: 1, maxRounds: 1, voting: 'group', timers: { clue: 20, debate: 60, vote: 0 } }) },
+    rapida: { name: 'Partida rápida', desc: 'Una ronda de pistas y una sola votación (una por impostor si hay varios).',
+      apply: (r) => Object.assign(r, { clueRounds: 1, maxRounds: r.randomImpostors ? 1 : Math.max(1, r.impostors), voting: 'group', timers: { clue: 20, debate: 60, vote: 0 } }) },
     larga: { name: 'Partida larga', desc: 'Dos rondas de pistas, votaciones hasta el final y última oportunidad.',
       apply: (r) => Object.assign(r, { clueRounds: 2, maxRounds: 0, guess: r.guess === 'off' ? 'win' : r.guess, timers: { clue: 0, debate: 0, vote: 0 } }) },
     grupo: { name: 'Grupo numeroso', desc: 'Más impostores, debate con tiempo y voto en grupo.',
       apply: (r, n) => Object.assign(r, { impostors: Math.max(2, Math.floor((n || 8) / 4)), clueRounds: 1, maxRounds: 0, voting: 'group', timers: { clue: 15, debate: 120, vote: 0 } }) }
   };
+
+  /* aplica un ajuste recomendado sin tocar lo que fija el modo; devuelve reglas nuevas */
+  function applyPreset(rules, modeId, presetId, n) {
+    const m = modeById(modeId), r = JSON.parse(JSON.stringify(rules)), keep = {};
+    (m.locked || []).forEach(k => { keep[k] = JSON.parse(JSON.stringify(r[k])); });
+    PRESETS[presetId].apply(r, n);
+    Object.assign(r, keep);
+    if (m.minImpostors && r.impostors < m.minImpostors) r.impostors = m.minImpostors;
+    r.impostors = Math.min(Math.max(1, r.impostors), maxImpostors(n));
+    return r;
+  }
 
   /* ---------- catálogo: palabras oficiales + personalizadas ---------- */
   // store: { custom:[{id,name,desc,h,words:[{id,w,sim}]}], added:{catId:[{id,w,sim}]}, wordState:{key:{off,fav}}, subOff:{'cat/sub':true} }
@@ -413,7 +424,7 @@ const Rules = (() => {
   }
   return {
     norm, keyOf, maxImpostors, impostorRange, statusAfterVote, shuffle, defaultRng, splitWord, abbr,
-    CLUE_TYPES, MODES, PRESETS, modeById, defaultRules, rulesForMode,
+    CLUE_TYPES, MODES, PRESETS, applyPreset, modeById, defaultRules, rulesForMode,
     buildCatalog, buildPool, validate,
     assignRoles, createGame, cardFor, turnOrder, questionTarget, clueCondition, checkClue,
     tally, aliveCounts, eliminate, checkWin, guessMatches, applyGuess

@@ -198,6 +198,18 @@ t('ajustes recomendados son válidos', () => {
   }
 });
 
+t('ajustes recomendados: no estropean ningún modo', () => {
+  for (const m of R.MODES) for (const id of Object.keys(R.PRESETS)) for (let n = 3; n <= 12; n++) {
+    const players = Array.from({ length: n }, (_, i) => 'J' + i);
+    const c = cfg(m.id, {}, players);
+    if (!R.validate(c, R.buildPool(cat, c)).ok) continue;   // p. ej. «Varios impostores» con 3 jugadores
+    c.rules = R.applyPreset(c.rules, m.id, id, n);
+    const after = R.validate(c, R.buildPool(cat, c)).errors;
+    assert.deepStrictEqual(after, [], `${m.id} + ${id} con ${n}: ${after.join(' ')}`);
+    (m.locked || []).forEach(k => assert.deepStrictEqual(c.rules[k], R.rulesForMode(m.id)[k], `${m.id} + ${id}: cambia ${k}, que fija el modo`));
+  }
+});
+
 t('simulación de partidas completas en todos los modos', () => {
   for (const m of R.MODES) for (let rep = 0; rep < 60; rep++) {
     const n = 3 + (rep % 8);

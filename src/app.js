@@ -1008,11 +1008,8 @@
     'rule-tg': el => { setRule(el.dataset.k, !getRule(el.dataset.k)); render(); },
     step: el => { const k = el.dataset.k; const v = Math.min(Number(el.dataset.max), Math.max(Number(el.dataset.min), getRule(k) + Number(el.dataset.d))); setRule(k, v); render(); },
     preset: el => {
-      const s = setup(), m = R.modeById(s.mode), keep = {};
-      (m.locked || []).forEach(k => { keep[k] = JSON.parse(JSON.stringify(s.rules[k])); });
-      R.PRESETS[el.dataset.id].apply(s.rules, s.players.length);
-      Object.assign(s.rules, keep);
-      if (m.minImpostors && s.rules.impostors < m.minImpostors) s.rules.impostors = m.minImpostors;
+      const s = setup();
+      s.rules = R.applyPreset(s.rules, s.mode, el.dataset.id, s.players.length);
       fitImpostors(); render(); toast(`Aplicado: ${R.PRESETS[el.dataset.id].name}`);
     },
     start: () => { if (validation().ok) go('intro'); },
