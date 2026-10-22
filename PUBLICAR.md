@@ -39,6 +39,8 @@ Después: `python build.py`, todas las pruebas y commit.
    La primera vez Git abre el navegador para entrar en GitHub.
 4. En la pestaña **Actions** se ve «Publicar en GitHub Pages». Al terminar, la web está en `https://TUUSUARIO.github.io/el-impostor/`.
 
+   Para que la dirección no lleve tu usuario: crea una organización de GitHub (gratis) con el nombre que quieras, pásale el repositorio (**Settings → Danger Zone → Transfer**) y renómbralo a `NOMBRE.github.io`. La web queda en `https://NOMBRE.github.io`. Así está publicada ahora: https://el-impostor.github.io
+
 Cada `git push` a `main` vuelve a compilar y publicar la web. El servidor no se actualiza solo: si cambia `server/`, hay que volver a ejecutar `npx wrangler deploy`.
 
 ## 3. Que solo tu web use el servidor (recomendado)

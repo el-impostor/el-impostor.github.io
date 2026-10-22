@@ -36,7 +36,7 @@ Estas normas se aplican siempre:
 - `src/app.js`: interfaz de un solo móvil, almacenamiento (`localStorage`, clave `impostor.v1`), sonidos (Web Audio) y editor de palabras/imágenes. `/*JAM*/` marca dónde se inserta `jam.js`.
 - `src/jam.js`: modo sala con anfitrión y jugadores. El anfitrión emite el estado público por el tema `st` y la tarjeta de cada jugador por `card`. Los jugadores escriben solo en su `presence` (nombre, clave pública, listo, pista, voto, intento). Tarjetas y votos van cifrados con ECDH P-256 + AES-GCM.
 - `src/relay-room.js`: adaptador del servidor de salas con la misma interfaz que `room` (`join(name,{hub,token})` → `emit/on/presence/onPeers/onStatus/leave`). Se reconecta solo y reenvía la presencia al volver. Solo entra en la versión web.
-- `server/`: servidor de salas (Worker + Durable Object `Sala`, `server/src/index.js`). Reenvía mensajes sin entenderlos, guarda el último estado, solo deja ser anfitrión a quien tiene el token de la sala, admite 30 jugadores y borra la sala tras 12 h sin actividad (variables en `server/wrangler.toml`). Su dirección pública va en `server/relay-url.txt`. Solo acepta conexiones desde `https://guillesanmo2-droid.github.io` (`ORIGENES`); las pruebas en local arrancan el servidor con `ORIGENES=*`.
+- `server/`: servidor de salas (Worker + Durable Object `Sala`, `server/src/index.js`). Reenvía mensajes sin entenderlos, guarda el último estado, solo deja ser anfitrión a quien tiene el token de la sala, admite 30 jugadores y borra la sala tras 12 h sin actividad (variables en `server/wrangler.toml`). Su dirección pública va en `server/relay-url.txt`. Solo acepta conexiones desde `https://el-impostor.github.io` (`ORIGENES`); las pruebas en local arrancan el servidor con `ORIGENES=*`.
 - `src/styles.css`: estilos de ambas versiones (oscuro por defecto, estética de «expediente confidencial»).
 - `src/template.html` (artefacto) y `web/template.html` (web): plantillas.
 - `web/sw.js`, `web/manifest.webmanifest`, `web/icon-*.png`: PWA. `web/vendor/qrcode.min.js` (qrcodejs 1.0.0) va dentro de `dist/web` y lo guarda el service worker.
@@ -74,6 +74,10 @@ node test/relay-dev.mjs 8787          # servidor de salas en local para probar a
 - **Impostores aleatorios:** `randomImpostors` con rango `impMin`/`impMax` (0 = máximo posible), y `knowEachOther` configurable. Tras cada expulsión se dice si sigue la partida sin revelar cuántos quedan.
 - **Inicio:** al pulsar «Jugar con un solo móvil» aparece primero la pantalla «¿Quién juega?», con los últimos nombres y los grupos guardados (`Store.groups`).
 - **Sonidos:** sintetizados con Web Audio (sin archivos); se desactivan en Ajustes.
+
+## Dónde está publicado
+- Web: https://el-impostor.github.io (repositorio `el-impostor/el-impostor.github.io`, organización de GitHub; se publica sola en cada push a `main`).
+- Servidor de salas: `wss://impostor-salas.impostor-salas.workers.dev` (Cloudflare, `npx wrangler deploy` desde `server/`).
 
 ## URL del artefacto
 `https://claude.ai/artifact/DiyBH86ezmKyiXWsB1nffh` (constante `ARTIFACT_URL` en `jam.js`; se usa para el enlace y el QR de la sala de Claude).
