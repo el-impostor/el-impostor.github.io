@@ -23,7 +23,7 @@ Estas normas se aplican siempre:
 
 ## Dos versiones que salen del mismo código
 - `dist/impostor.html`: artefacto de Claude (claude.ai). La sala usa la capacidad `room` de Claude y solo admite gente con cuenta y acceso compartido. Las imágenes se suben con `assets`.
-- `dist/web/`: versión web independiente (PWA instalable). La sala va móvil a móvil con PeerJS: el móvil del anfitrión hace de centro y no hace falta cuenta. Se sube a un hosting estático (Netlify Drop, GitHub Pages…). `dist/el-impostor-web.zip` es esa carpeta comprimida.
+- `dist/web/`: versión web independiente (PWA instalable). La sala va por el servidor de salas de `server/` (Cloudflare Workers + Durable Objects) y no hace falta cuenta para jugar. Se publica en GitHub Pages con `.github/workflows/pages.yml`. `dist/el-impostor-web.zip` es esa carpeta comprimida.
 
 ## Estructura
 - `src/words.js`: banco de palabras (21 categorías, formato `"palabra|parecida"`) y preguntas sugeridas.
@@ -35,10 +35,11 @@ Estas normas se aplican siempre:
   - `statusAfterVote` (seguir jugando o fin).
 - `src/app.js`: interfaz de un solo móvil, almacenamiento (`localStorage`, clave `impostor.v1`), sonidos (Web Audio) y editor de palabras/imágenes. `/*JAM*/` marca dónde se inserta `jam.js`.
 - `src/jam.js`: modo sala con anfitrión y jugadores. El anfitrión emite el estado público por el tema `st` y la tarjeta de cada jugador por `card`. Los jugadores escriben solo en su `presence` (nombre, clave pública, listo, pista, voto, intento). Tarjetas y votos van cifrados con ECDH P-256 + AES-GCM.
-- `src/peer-room.js`: adaptador PeerJS con la misma interfaz que `room` (`join(name,{hub})` → `emit/on/presence/onPeers/leave`). Solo entra en la versión web.
+- `src/relay-room.js`: adaptador del servidor de salas con la misma interfaz que `room` (`join(name,{hub,token})` → `emit/on/presence/onPeers/onStatus/leave`). Se reconecta solo y reenvía la presencia al volver. Solo entra en la versión web.
+- `server/`: servidor de salas (Worker + Durable Object `Sala`, `server/src/index.js`). Reenvía mensajes sin entenderlos, guarda el último estado, solo deja ser anfitrión a quien tiene el token de la sala, admite 30 jugadores y borra la sala tras 12 h sin actividad (variables en `server/wrangler.toml`). Su dirección pública va en `server/relay-url.txt`.
 - `src/styles.css`: estilos de ambas versiones (oscuro por defecto, estética de «expediente confidencial»).
 - `src/template.html` (artefacto) y `web/template.html` (web): plantillas.
-- `web/sw.js`, `web/manifest.webmanifest`, `web/icon-*.png`: PWA.
+- `web/sw.js`, `web/manifest.webmanifest`, `web/icon-*.png`: PWA. `web/vendor/qrcode.min.js` (qrcodejs 1.0.0) va dentro de `dist/web` y lo guarda el service worker.
 - `build.py`: genera `dist/impostor.html`, `dist/web/` y el zip.
 
 ## Comandos
@@ -47,9 +48,14 @@ python3 build.py                      # compilar las dos versiones
 node test/rules.test.js               # lógica (reparto, modos, victoria, imágenes, aleatorio)
 python3 test/ui_test.py shots         # interfaz de un solo móvil (Playwright, Chromium)
 python3 test/jam_test.py shots        # sala de Claude simulada: anfitrión + 3 móviles
-MODE=web python3 test/jam_test.py shots   # sala web (PeerJS simulado)
+MODE=web python3 test/jam_test.py shots   # sala web contra el servidor de salas real (wrangler dev en local)
+node test/server.test.mjs             # servidor de salas
+node test/relay-dev.mjs 8787          # servidor de salas en local para probar a mano
 ```
-Las pruebas de interfaz necesitan `pip install playwright && playwright install chromium`.
+- Las pruebas de interfaz necesitan `pip install playwright && playwright install chromium`.
+- Las del servidor y la sala web necesitan `npm install` en `server/` (instala wrangler). No hace falta cuenta de Cloudflare.
+- Probar la sala a mano: tarea «Probar sala en local» y abrir varias ventanas en `http://localhost:8000/?sala-servidor=ws://127.0.0.1:8787` (`?sala-servidor=` solo acepta servidores locales).
+- Publicar el servidor: `cd server && npx wrangler deploy`; poner la dirección `wss://…workers.dev` en `server/relay-url.txt` y volver a compilar.
 
 - `python3 watch.py` recompila al cambiar algo en `src/` o `web/`.
 - En Windows se usa `python` (el `python3` de Microsoft Store es un acceso directo vacío). `build.py` lee y escribe siempre en UTF-8 con LF.
@@ -58,6 +64,10 @@ Las pruebas de interfaz necesitan `pip install playwright && playwright install 
 ## Decisiones tomadas
 - Todo funciona sin cuenta y sin conexión en modo un solo móvil. Los datos son locales del dispositivo; hay copia de seguridad en Ajustes.
 - **Votación en sala:** siempre secreta desde cada móvil. El anfitrión puede cerrarla antes de tiempo.
+- **Sala web con servidor propio** (Cloudflare Workers + Durable Objects, gratis para grupos de amigos) en vez de PeerJS: funciona con datos móviles y en redes con cortafuegos, y el servidor guarda el estado si el anfitrión se va un rato.
+- **Cifrado de extremo a extremo en la web:** además de tarjetas y votos, el estado público, las pistas y el intento de adivinar van cifrados con una clave de sala que el anfitrión reparte a cada jugador (tema `rk`). El servidor solo ve nombres y bloques cifrados. Límite conocido: el móvil del jugador se fía de la clave pública del anfitrión que le llega; no se comprueba aparte.
+- **Claves de turno y voto** llevan el id de la partida (`gid.ronda.…`), para que no cuente nada de la partida anterior.
+- **Lo nuevo de la sala web solo se activa con `STANDALONE`:** el artefacto de Claude se comporta igual que antes.
 - **Imágenes como palabras:**
   - En el artefacto, si hay `assets` se suben; si no, se guarda una copia reducida (`data:`) en el móvil, que en sala de Claude no se puede usar.
   - En la web viajan cifradas dentro de la tarjeta.
